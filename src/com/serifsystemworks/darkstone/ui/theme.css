@@ -1,0 +1,211 @@
+
+.root, .root-pane {
+    -fx-background-color: #12141a;
+    -fx-font-family: "Segoe UI", "Inter", "Tahoma", sans-serif;
+    -fx-font-size: 13px;
+    -fx-base: #1c1f28;
+    -fx-accent: #6c9eff;
+    -fx-focus-color: #6c9eff;
+    -fx-faint-focus-color: transparent;
+    -fx-text-fill: #e8ecf4;
+}
+
+.header {
+    -fx-background-color: #0e1016;
+    -fx-padding: 16 20 14 20;
+    -fx-border-color: #2a3142;
+    -fx-border-width: 0 0 1 0;
+}
+
+.title {
+    -fx-font-size: 20px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #f2f5fb;
+}
+
+.subtitle {
+    -fx-font-size: 12px;
+    -fx-text-fill: #8b93a7;
+}
+
+.sidebar-scroll {
+    -fx-background-color: #161922;
+    -fx-border-color: #2a3142;
+    -fx-border-width: 0 1 0 0;
+    -fx-pref-width: 400;
+    -fx-min-width: 360;
+}
+
+.sidebar-scroll > .viewport {
+    -fx-background-color: #161922;
+}
+
+.sidebar {
+    -fx-background-color: #161922;
+    -fx-padding: 14;
+}
+
+.card {
+    -fx-background-color: #1c2130;
+    -fx-background-radius: 10;
+    -fx-padding: 12 14 12 14;
+    -fx-border-color: #2a3142;
+    -fx-border-radius: 10;
+    -fx-border-width: 1;
+}
+
+.section-label {
+    -fx-text-fill: #8b93a7;
+    -fx-font-weight: bold;
+    -fx-font-size: 11px;
+    -fx-letter-spacing: 0.6px;
+}
+
+.muted {
+    -fx-text-fill: #8b93a7;
+    -fx-font-size: 12px;
+}
+
+.path-label {
+    -fx-text-fill: #c5cbe0;
+    -fx-font-size: 11px;
+}
+
+.button {
+    -fx-background-color: #2a3142;
+    -fx-text-fill: #e8ecf4;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-color: transparent;
+    -fx-padding: 7 14 7 14;
+    -fx-cursor: hand;
+}
+
+.button:hover {
+    -fx-background-color: #3a4560;
+}
+
+.button:pressed {
+    -fx-background-color: #232a3a;
+}
+
+.button:disabled {
+    -fx-opacity: 0.4;
+}
+
+.button.master {
+    -fx-background-color: #3d6cf0;
+    -fx-font-weight: bold;
+    -fx-text-fill: white;
+}
+
+.button.master:hover {
+    -fx-background-color: #5a84ff;
+}
+
+.button.danger {
+    -fx-background-color: #3a2a2a;
+    -fx-text-fill: #f0c0c0;
+}
+
+.button.danger:hover {
+    -fx-background-color: #4a3333;
+}
+
+.button.icon-btn {
+    -fx-padding: 4 10 4 10;
+    -fx-min-width: 36;
+}
+
+.check-box {
+    -fx-text-fill: #e8ecf4;
+}
+
+.check-box .box {
+    -fx-background-color: #12141a;
+    -fx-border-color: #3a4560;
+    -fx-background-radius: 4;
+    -fx-border-radius: 4;
+}
+
+.check-box:selected .mark {
+    -fx-background-color: #6c9eff;
+}
+
+.text-field, .range-field {
+    -fx-background-color: #12141a;
+    -fx-text-fill: #e8ecf4;
+    -fx-border-color: #2a3142;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-prompt-text-fill: #6a738a;
+    -fx-padding: 6 8 6 8;
+}
+
+.range-field {
+    -fx-pref-width: 52;
+    -fx-max-width: 64;
+}
+
+.text-area, .text-area .content {
+    -fx-background-color: #0e1016;
+    -fx-control-inner-background: #0e1016;
+    -fx-text-fill: #c5cbe0;
+    -fx-highlight-fill: #3d6cf0;
+    -fx-highlight-text-fill: white;
+}
+
+.text-area {
+    -fx-font-family: "Cascadia Mono", "Consolas", monospace;
+    -fx-font-size: 12px;
+    -fx-border-color: #2a3142;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+}
+
+.bottom-stack {
+    -fx-background-color: #0e1016;
+}
+
+.log-pane {
+    -fx-background-color: #0e1016;
+    -fx-padding: 6 12 4 12;
+    -fx-max-height: 160;
+}
+
+.log-pane .text-area {
+    -fx-pref-row-count: 5;
+    -fx-font-size: 11px;
+    -fx-max-height: 120;
+}
+
+/* Menu fills the window */
+.sidebar-scroll {
+    -fx-pref-width: -1;
+    -fx-min-width: -1;
+}
+
+.status-bar {
+    -fx-background-color: #0e1016;
+    -fx-padding: 8 14 8 14;
+    -fx-border-color: #2a3142;
+    -fx-border-width: 1 0 0 0;
+}
+
+.progress-bar .bar {
+    -fx-background-color: #3d6cf0;
+    -fx-background-radius: 4;
+}
+
+.progress-bar .track {
+    -fx-background-color: #2a3142;
+    -fx-background-radius: 4;
+}
+
+.label {
+    -fx-text-fill: #e8ecf4;
+}
+
+.scroll-pane, .scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
