@@ -1,5 +1,7 @@
 # Darkstone PSX Randomizer
 
+**v3.0** — SOTN-style presets (General / Advanced / Chaotic), CUE import/export with seed in the filename, bronze + purple diamond UI. **Loot (QUEST$ items) is OFF by default** to avoid softlocks.
+
 JavaFX tool for **Darkstone** (PlayStation, 1999). Unpack `.PSM` archives, randomize gameplay data, install patched files, then rebuild a bootable image with **CDImg**.
 
 In-place same-size patches keep the PSM TOC intact (no black-screen repacks).

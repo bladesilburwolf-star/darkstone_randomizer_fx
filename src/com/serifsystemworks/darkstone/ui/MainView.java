@@ -18,42 +18,51 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.Separator;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
-import javafx.scene.control.TextInputDialog;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.prefs.Preferences;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+/**
+ * SOTN-style Darkstone randomizer shell: presets, CUE import/export with seed,
+ * bronze metal frame + purple diamond banner.
+ */
 public final class MainView {
 
-    public static final String VERSION = "2.5.1";
+    public static final String VERSION = "3.0.0";
 
     private final Stage stage;
     private final Preferences prefs = Preferences.userNodeForPackage(MainView.class);
 
     private Path cdRoot;
     private Path outputRoot;
+    private Path cuePath;
 
     private final Label cdPathLabel = new Label("Not set");
     private final Label outPathLabel = new Label("Not set");
+    private final Label cuePathLabel = new Label("No CUE loaded");
     private final TextArea logArea = new TextArea();
-    private final Label statusLabel = new Label("Set CD + output, unpack, then run.");
+    private final Label statusLabel = new Label("Load CUE or CD folder · pick preset · Randomize");
     private final ProgressBar progressBar = new ProgressBar(0);
 
     private final TextField seedField = new TextField();
@@ -87,11 +96,18 @@ public final class MainView {
     private final CheckBox chkPalShuffle = new CheckBox("Palette shuffle mode");
     private final CheckBox chkQuests = new CheckBox("Quest items");
     private final CheckBox chkVideos = new CheckBox("Skip videos");
+    private final CheckBox chkMusic = new CheckBox("Music (RAW)");
+    private final CheckBox chkVideoShuffle = new CheckBox("Videos (DPS)");
     private final CheckBox chkCopy = new CheckBox("Install to CD");
     private final CheckBox chkForce = new CheckBox("Force unpack");
 
+    private final Button btnPresetGeneral = new Button("General");
+    private final Button btnPresetAdvanced = new Button("Advanced");
+    private final Button btnPresetChaotic = new Button("Chaotic");
+
     private final List<Button> actionButtons = new ArrayList<>();
     private volatile boolean busy;
+    private String activePreset = "General";
 
     private final LogSink logSink = new LogSink() {
         @Override public void log(String message) {
@@ -116,20 +132,26 @@ public final class MainView {
 
     public Parent build() {
         defaults();
-        BorderPane root = new BorderPane();
-        root.getStyleClass().add("root-pane");
-        root.setTop(buildHeader());
-        root.setCenter(buildSidebar());
+        BorderPane inner = new BorderPane();
+        inner.getStyleClass().add("root-pane");
+        VBox top = new VBox(buildHeader(), buildPresetBar());
+        inner.setTop(top);
+        inner.setCenter(buildSidebar());
         VBox bottom = new VBox(buildLog(), buildStatus());
         bottom.getStyleClass().add("bottom-stack");
-        root.setBottom(bottom);
+        inner.setBottom(bottom);
+
+        StackPane frame = new StackPane(inner);
+        frame.getStyleClass().add("frame-outer");
         restorePaths();
+        applyPresetGeneral();
         logStartup();
-        return root;
+        return frame;
     }
 
     private void defaults() {
-        chkLoot.setSelected(true);
+        // Quest item loot OFF by default — too easy to softlock
+        chkLoot.setSelected(false);
         chkHeroes.setSelected(true);
         chkGear.setSelected(true);
         chkGold.setSelected(true);
@@ -144,13 +166,15 @@ public final class MainView {
         chkMaps.setSelected(false);
         chkDungeons.setSelected(true);
         chkCrossLand.setSelected(false);
-        chkPalettes.setSelected(true);
+        chkPalettes.setSelected(false);
         chkPalShuffle.setSelected(false);
         chkQuests.setSelected(false);
         chkVideos.setSelected(false);
+        chkMusic.setSelected(false);
+        chkVideoShuffle.setSelected(false);
         chkCopy.setSelected(true);
         seedField.setText(RandomizerOptions.randomSeedString());
-        seedField.setPrefColumnCount(12);
+        seedField.setPrefColumnCount(14);
         seedField.setPromptText("seed");
         logArea.setEditable(false);
         logArea.setWrapText(false);
@@ -158,12 +182,21 @@ public final class MainView {
         progressBar.setProgress(0);
         cdPathLabel.getStyleClass().add("path-label");
         outPathLabel.getStyleClass().add("path-label");
+        cuePathLabel.getStyleClass().add("path-label");
+
+        for (Button b : List.of(btnPresetGeneral, btnPresetAdvanced, btnPresetChaotic)) {
+            b.getStyleClass().add("preset");
+            actionButtons.add(b);
+        }
+        btnPresetGeneral.setOnAction(e -> applyPresetGeneral());
+        btnPresetAdvanced.setOnAction(e -> applyPresetAdvanced());
+        btnPresetChaotic.setOnAction(e -> applyPresetChaotic());
     }
 
     private HBox buildHeader() {
-        Label title = new Label("Darkstone Randomizer");
+        Label title = new Label("DARKSTONE RANDOMIZER");
         title.getStyleClass().add("title");
-        Label ver = new Label("v" + VERSION + "  ·  PSX  ·  rebuild ISO with CDImg");
+        Label ver = new Label("v" + VERSION + "  ·  PSX  ·  CUE in / seed out  ·  CDImg rebuild");
         ver.getStyleClass().add("subtitle");
         VBox text = new VBox(2, title, ver);
         HBox header = new HBox(text);
@@ -172,22 +205,141 @@ public final class MainView {
         return header;
     }
 
+    private HBox buildPresetBar() {
+        Label lab = new Label("PRESET");
+        lab.getStyleClass().add("section-label");
+        HBox bar = new HBox(10, lab, btnPresetGeneral, btnPresetAdvanced, btnPresetChaotic, spacer());
+        bar.getStyleClass().add("preset-bar");
+        bar.setAlignment(Pos.CENTER_LEFT);
+        return bar;
+    }
+
+    private void markPreset(String name) {
+        activePreset = name;
+        btnPresetGeneral.getStyleClass().remove("preset-active");
+        btnPresetAdvanced.getStyleClass().remove("preset-active");
+        btnPresetChaotic.getStyleClass().remove("preset-active");
+        if ("General".equals(name)) btnPresetGeneral.getStyleClass().add("preset-active");
+        if ("Advanced".equals(name)) btnPresetAdvanced.getStyleClass().add("preset-active");
+        if ("Chaotic".equals(name)) btnPresetChaotic.getStyleClass().add("preset-active");
+        statusLabel.setText("Preset: " + name);
+        logSink.log("Preset → " + name);
+    }
+
+    /** Safe casual run — hero variety, light dungeons, no quest softlocks. */
+    private void applyPresetGeneral() {
+        setAllOptions(false);
+        chkHeroes.setSelected(true);
+        chkGear.setSelected(true);
+        chkGold.setSelected(true);
+        chkSpells.setSelected(true);
+        chkWeapons.setSelected(true);
+        chkSpellLv.setSelected(true);
+        chkSkillLv.setSelected(true);
+        chkPlayerLv.setSelected(true);
+        chkDungeons.setSelected(true);
+        chkCopy.setSelected(true);
+        chkLoot.setSelected(false);
+        chkQuests.setSelected(false);
+        statMin.setText("12"); statMax.setText("28");
+        goldMin.setText("50"); goldMax.setText("300");
+        levelMin.setText("1"); levelMax.setText("3");
+        skillMin.setText("1"); skillMax.setText("3");
+        weaponMin.setText("3"); weaponMax.setText("18");
+        markPreset("General");
+    }
+
+    /** Deeper rando — enemies, shops, palettes, music; still no quest-item shuffle. */
+    private void applyPresetAdvanced() {
+        setAllOptions(false);
+        chkHeroes.setSelected(true);
+        chkGear.setSelected(true);
+        chkGold.setSelected(true);
+        chkSpells.setSelected(true);
+        chkWeapons.setSelected(true);
+        chkSpellLv.setSelected(true);
+        chkSkillLv.setSelected(true);
+        chkPlayerLv.setSelected(true);
+        chkEnemyLv.setSelected(true);
+        chkEnemies.setSelected(true);
+        chkShops.setSelected(true);
+        chkDungeons.setSelected(true);
+        chkPalettes.setSelected(true);
+        chkMusic.setSelected(true);
+        chkCopy.setSelected(true);
+        chkLoot.setSelected(false);
+        chkQuests.setSelected(false);
+        statMin.setText("10"); statMax.setText("35");
+        goldMin.setText("20"); goldMax.setText("600");
+        levelMin.setText("1"); levelMax.setText("6");
+        skillMin.setText("1"); skillMax.setText("6");
+        weaponMin.setText("2"); weaponMax.setText("28");
+        markPreset("Advanced");
+    }
+
+    /** Kitchen sink — cross-pack tiles, video shuffle, optional loot (still no keys). */
+    private void applyPresetChaotic() {
+        setAllOptions(true);
+        chkQuests.setSelected(false); // still protect quest-script option
+        chkLoot.setSelected(false);   // QUEST$ item names still off (softlock risk)
+        chkVideos.setSelected(false); // shuffle instead of skip
+        chkVideoShuffle.setSelected(true);
+        chkCrossLand.setSelected(true);
+        chkPalShuffle.setSelected(true);
+        chkForce.setSelected(false);
+        statMin.setText("5"); statMax.setText("40");
+        goldMin.setText("0"); goldMax.setText("999");
+        levelMin.setText("1"); levelMax.setText("10");
+        skillMin.setText("1"); skillMax.setText("10");
+        weaponMin.setText("1"); weaponMax.setText("40");
+        markPreset("Chaotic");
+    }
+
+    private void setAllOptions(boolean on) {
+        chkLoot.setSelected(on);
+        chkHeroes.setSelected(on);
+        chkGear.setSelected(on);
+        chkGold.setSelected(on);
+        chkSpells.setSelected(on);
+        chkWeapons.setSelected(on);
+        chkSpellLv.setSelected(on);
+        chkSkillLv.setSelected(on);
+        chkPlayerLv.setSelected(on);
+        chkEnemyLv.setSelected(on);
+        chkEnemies.setSelected(on);
+        chkShops.setSelected(on);
+        chkMaps.setSelected(on);
+        chkDungeons.setSelected(on);
+        chkCrossLand.setSelected(on);
+        chkPalettes.setSelected(on);
+        chkPalShuffle.setSelected(on);
+        chkQuests.setSelected(on);
+        chkVideos.setSelected(on);
+        chkMusic.setSelected(on);
+        chkVideoShuffle.setSelected(on);
+        chkCopy.setSelected(on);
+    }
+
     private ScrollPane buildSidebar() {
         VBox side = new VBox(12);
         side.getStyleClass().add("sidebar");
         side.setPrefWidth(Region.USE_COMPUTED_SIZE);
         side.setMaxWidth(Double.MAX_VALUE);
 
-        side.getChildren().add(card("Folders",
+        side.getChildren().add(card("Disc / folders",
+                pathRow("CUE", cuePathLabel, this::importCue),
                 pathRow("CD", cdPathLabel, this::selectCdFolder),
                 pathRow("Out", outPathLabel, this::selectOutput),
-                chkForce));
+                flow(chkForce, chkCopy)));
 
         side.getChildren().add(card("Seed",
                 new HBox(8, grow(seedField),
                         action("New", () -> seedField.setText(RandomizerOptions.randomSeedString())),
-                        action("Copy", this::copySeed),
-                        action("Save", this::exportSeed))));
+                        action("Copy", this::copySeed)),
+                new HBox(8,
+                        action("Import CUE", this::importCue),
+                        action("Export CUE", this::exportCueWithSeed),
+                        action("Save seed", this::exportSeed))));
 
         GridPane ranges = new GridPane();
         ranges.setHgap(6);
@@ -208,8 +360,8 @@ public final class MainView {
                 flow(chkEnemies, chkEnemyLv, chkShops, chkMaps, chkDungeons, chkCrossLand,
                         chkPalettes, chkPalShuffle, chkQuests)));
 
-        side.getChildren().add(card("Install",
-                flow(chkCopy, chkVideos)));
+        side.getChildren().add(card("Audio / video",
+                flow(chkMusic, chkVideoShuffle, chkVideos)));
 
         Button unpack = action("Unpack", () -> runInBackground("Unpacking...", this::unpackAll));
         Button scan = action("Scan", () -> runInBackground("Scanning...", this::scanTables));
@@ -254,16 +406,125 @@ public final class MainView {
         try {
             String seed = seedField.getText() == null ? "" : seedField.getText().trim();
             Path dir = outputRoot != null ? outputRoot : (cdRoot != null ? cdRoot : Path.of("."));
-            Path file = dir.resolve("darkstone_seed.txt");
+            Path file = dir.resolve("darkstone_seed_" + sanitizeSeed(seed) + ".txt");
             String body = "seed=" + seed + "\n"
                     + "hash=" + RandomizerOptions.seedFromString(seed) + "\n"
+                    + "preset=" + activePreset + "\n"
                     + "version=" + VERSION + "\n";
             Files.writeString(file, body);
-            statusLabel.setText("Seed saved: " + file);
+            statusLabel.setText("Seed saved: " + file.getFileName());
             logSink.log("Seed exported: " + file);
         } catch (Exception e) {
             alert(Alert.AlertType.ERROR, "Could not save seed: " + e.getMessage());
         }
+    }
+
+    /** Open a .cue; set CD root to its folder; pull seed from filename if present. */
+    private void importCue() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Import Darkstone CUE sheet");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CUE sheets", "*.cue", "*.CUE"));
+        File initial = prefsPath("cuePath");
+        if (initial == null) initial = prefsPath("cdRoot");
+        if (initial != null) chooser.setInitialDirectory(initial.isDirectory() ? initial : initial.getParentFile());
+        File picked = chooser.showOpenDialog(stage);
+        if (picked == null) return;
+        try {
+            cuePath = picked.toPath();
+            cuePathLabel.setText(cuePath.getFileName().toString());
+            prefs.put("cuePath", cuePath.toString());
+
+            Path parent = cuePath.getParent();
+            if (parent != null) {
+                cdRoot = parent;
+                cdPathLabel.setText(cdRoot.toString());
+                prefs.put("cdRoot", cdRoot.toString());
+            }
+
+            String name = cuePath.getFileName().toString();
+            Matcher m = Pattern.compile("(?i)(?:seed[_-]?)([A-Za-z0-9_-]{3,})").matcher(name);
+            if (m.find()) {
+                seedField.setText(m.group(1));
+                logSink.log("Seed taken from CUE name: " + m.group(1));
+            }
+            // Also parse FILE line for sanity
+            String text = Files.readString(cuePath, StandardCharsets.ISO_8859_1);
+            Matcher fm = Pattern.compile("(?i)FILE\\s+\"([^\"]+)\"").matcher(text);
+            if (fm.find()) {
+                logSink.log("CUE image: " + fm.group(1));
+            }
+            logSink.log("Imported CUE: " + cuePath);
+            statusLabel.setText("CUE loaded · CD = " + (parent != null ? parent.getFileName() : "?"));
+        } catch (Exception e) {
+            alert(Alert.AlertType.ERROR, "CUE import failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Write a new .cue next to the original (or in Out) named with the seed,
+     * e.g. Darkstone_seedABC123.cue — same FILE target as the source sheet.
+     */
+    private void exportCueWithSeed() {
+        try {
+            String seed = seedField.getText() == null ? "" : seedField.getText().trim();
+            if (seed.isBlank()) {
+                alert(Alert.AlertType.WARNING, "Enter a seed first.");
+                return;
+            }
+            Path sourceCue = cuePath;
+            if (sourceCue == null || !Files.isRegularFile(sourceCue)) {
+                // try find any .cue under cdRoot
+                if (cdRoot != null && Files.isDirectory(cdRoot)) {
+                    try (var stream = Files.list(cdRoot)) {
+                        sourceCue = stream
+                                .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".cue"))
+                                .findFirst()
+                                .orElse(null);
+                    }
+                }
+            }
+            if (sourceCue == null || !Files.isRegularFile(sourceCue)) {
+                alert(Alert.AlertType.WARNING, "Import a CUE first (or place one in the CD folder).");
+                return;
+            }
+
+            String body = Files.readString(sourceCue, StandardCharsets.ISO_8859_1);
+            String safe = sanitizeSeed(seed);
+            String outName = "Darkstone_seed" + safe + ".cue";
+            Path destDir = outputRoot != null ? outputRoot
+                    : (sourceCue.getParent() != null ? sourceCue.getParent() : Path.of("."));
+            Path dest = destDir.resolve(outName);
+
+            // Annotate with seed comment at top (harmless for most tools)
+            String annotated = "; Darkstone Randomizer " + VERSION + "\r\n"
+                    + "; seed=" + seed + "\r\n"
+                    + "; hash=" + RandomizerOptions.seedFromString(seed) + "\r\n"
+                    + "; preset=" + activePreset + "\r\n"
+                    + body;
+            Files.writeString(dest, annotated, StandardCharsets.ISO_8859_1);
+
+            // Also drop seed txt beside it
+            Path seedTxt = destDir.resolve("darkstone_seed_" + safe + ".txt");
+            Files.writeString(seedTxt, "seed=" + seed + "\n"
+                    + "hash=" + RandomizerOptions.seedFromString(seed) + "\n"
+                    + "preset=" + activePreset + "\n"
+                    + "cue=" + dest.getFileName() + "\n"
+                    + "version=" + VERSION + "\n");
+
+            cuePath = dest;
+            cuePathLabel.setText(dest.getFileName().toString());
+            logSink.log("Exported CUE: " + dest);
+            logSink.log("Exported seed: " + seedTxt);
+            statusLabel.setText("Exported " + outName);
+        } catch (Exception e) {
+            alert(Alert.AlertType.ERROR, "CUE export failed: " + e.getMessage());
+        }
+    }
+
+    private static String sanitizeSeed(String seed) {
+        String s = seed.replaceAll("[^A-Za-z0-9_-]", "");
+        if (s.length() > 32) s = s.substring(0, 32);
+        return s.isEmpty() ? "seed" : s;
     }
 
     private HBox buildStatus() {
@@ -306,10 +567,6 @@ public final class MainView {
     }
 
     private static HBox flow(javafx.scene.Node... nodes) {
-        HBox box = new HBox(10);
-        box.setAlignment(Pos.CENTER_LEFT);
-        box.getStyleClass().add("chip-row");
-        // wrap-like: put in VBox of HBoxes every 3
         VBox col = new VBox(6);
         HBox row = new HBox(10);
         row.setAlignment(Pos.CENTER_LEFT);
@@ -326,8 +583,7 @@ public final class MainView {
         if (!row.getChildren().isEmpty()) {
             col.getChildren().add(row);
         }
-        HBox outer = new HBox(col);
-        return outer;
+        return new HBox(col);
     }
 
     private static TextField rangeField(String v) {
@@ -414,16 +670,21 @@ public final class MainView {
             CdInstaller.install(outputRoot, requireCd(), logSink);
         }
         try {
-            Path seedFile = requireOutput().resolve("darkstone_seed.txt");
             String seed = options.seedText == null ? "" : options.seedText.trim();
+            Path seedFile = requireOutput().resolve("darkstone_seed_" + sanitizeSeed(seed) + ".txt");
             Files.writeString(seedFile, "seed=" + seed + "\n"
                     + "hash=" + RandomizerOptions.seedFromString(seed) + "\n"
+                    + "preset=" + activePreset + "\n"
                     + "version=" + VERSION + "\n");
             logSink.log("Seed exported: " + seedFile);
+            // Auto-export CUE with seed when one is known
+            if (cuePath != null && Files.isRegularFile(cuePath)) {
+                Platform.runLater(this::exportCueWithSeed);
+            }
         } catch (Exception e) {
             logSink.log("[!] Seed export skipped: " + e.getMessage());
         }
-        logSink.log("Next: rebuild the ISO with CDImg, then boot that image.");
+        logSink.log("Next: rebuild ISO with CDImg (or burn the seeded CUE), then boot.");
     }
 
     private void confirmAndInstallToCd() {
@@ -465,6 +726,9 @@ public final class MainView {
         o.paletteShuffle = chkPalShuffle.isSelected();
         o.quests = chkQuests.isSelected();
         o.disableVideos = chkVideos.isSelected();
+        o.music = chkMusic.isSelected();
+        o.videos = chkVideoShuffle.isSelected();
+        o.cdRoot = cdRoot;
         o.copyToCd = chkCopy.isSelected();
         o.seedText = seedField.getText();
         o.statMin = parse(statMin, 12);
@@ -493,7 +757,7 @@ public final class MainView {
     }
 
     private Path requireCd() {
-        if (cdRoot == null) throw new IllegalStateException("Select the CD folder first.");
+        if (cdRoot == null) throw new IllegalStateException("Select the CD folder (or Import CUE) first.");
         return cdRoot;
     }
 
@@ -548,6 +812,11 @@ public final class MainView {
             outputRoot = Path.of(out);
             outPathLabel.setText(out);
         }
+        String cue = prefs.get("cuePath", "");
+        if (!cue.isBlank() && Files.isRegularFile(Path.of(cue))) {
+            cuePath = Path.of(cue);
+            cuePathLabel.setText(cuePath.getFileName().toString());
+        }
     }
 
     private File prefsPath(String key) {
@@ -555,14 +824,19 @@ public final class MainView {
         if (value.isBlank()) return null;
         Path p = Path.of(value);
         if (Files.isDirectory(p)) return p.toFile();
+        if (Files.isRegularFile(p)) {
+            Path parent = p.getParent();
+            return parent != null && Files.isDirectory(parent) ? parent.toFile() : null;
+        }
         Path parent = p.getParent();
         return parent != null && Files.isDirectory(parent) ? parent.toFile() : null;
     }
 
     private void logStartup() {
         logSink.log("Darkstone PSX Randomizer " + VERSION);
-        logSink.log("Workflow: Unpack → Randomize → Install → rebuild ISO with CDImg.");
-        logSink.log("Land/dungeon tiles: FE + room templates in LAND* and QUEST LEVEL*. Cross-pack mixes 56-byte FE across packs.");
+        logSink.log("SOTN-style flow: Import CUE → Preset → Randomize → Export CUE (seed in name).");
+        logSink.log("Loot (QUEST$ items) is OFF by default to avoid softlocks.");
+        logSink.log("Presets: General (safe) · Advanced · Chaotic.");
     }
 
     private void alert(Alert.AlertType type, String message) {

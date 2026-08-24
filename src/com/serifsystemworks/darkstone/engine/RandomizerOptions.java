@@ -2,7 +2,7 @@ package com.serifsystemworks.darkstone.engine;
 
 public final class RandomizerOptions {
     // Core
-    public boolean loot = true;
+    public boolean loot = false;
     public boolean enemies = false;
     public boolean heroes = true;
     public boolean shops = false;
@@ -34,9 +34,15 @@ public final class RandomizerOptions {
 
     // QoL
     public boolean disableVideos = false;
+    /** Shuffle Music/*.RAW track contents (same filenames, mixed audio). */
+    public boolean music = false;
+    /** Shuffle CINE/*.DPS FMV contents. */
+    public boolean videos = false;
     public boolean copyToCd = true;
 
     public String seedText = "";
+    /** Optional CD root for Music/CINE loose-file shuffle. */
+    public java.nio.file.Path cdRoot;
 
     public int statMin = 12;
     public int statMax = 35;

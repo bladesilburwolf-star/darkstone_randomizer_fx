@@ -95,6 +95,12 @@ public final class RandomizerEngine {
         if (options.palettes) {
             randomizePalettes(rnd, options);
         }
+        if (options.music) {
+            randomizeMusic(rnd, options);
+        }
+        if (options.videos) {
+            randomizeVideos(rnd, options);
+        }
         if (options.quests) {
             randomizeQuests(rnd);
         }
@@ -1140,6 +1146,101 @@ public final class RandomizerEngine {
         int ng = Math.max(0, Math.min(31, Math.round((gg + m) * 31)));
         int nb = Math.max(0, Math.min(31, Math.round((bb + m) * 31)));
         return stp | (nb << 10) | (ng << 5) | nr;
+    }
+
+
+    /**
+     * Shuffle Music/*.RAW contents under the CD root (filenames stay so the game
+     * still opens 01.RAW etc., but the PCM data is permuted).
+     */
+    public int randomizeMusic(Random rnd, RandomizerOptions options) {
+        try {
+            Path root = options.cdRoot != null ? options.cdRoot : outputRoot;
+            List<Path> tracks = findLooseFiles(root, ".RAW");
+            // Ignore dummy / silence pads if tiny
+            tracks = tracks.stream()
+                    .filter(p -> {
+                        try {
+                            return Files.size(p) > 4096;
+                        } catch (IOException ex) {
+                            return false;
+                        }
+                    })
+                    .sorted()
+                    .collect(Collectors.toList());
+            if (tracks.size() < 2) {
+                log.log("[+] Music: need >=2 .RAW tracks under CD (found " + tracks.size()
+                        + "). Copy Music/ folder onto the CD path.");
+                return 0;
+            }
+            List<byte[]> contents = new ArrayList<>();
+            for (Path p : tracks) {
+                contents.add(Files.readAllBytes(p));
+            }
+            Collections.shuffle(contents, rnd);
+            int n = 0;
+            for (int i = 0; i < tracks.size(); i++) {
+                Files.write(tracks.get(i), contents.get(i));
+                n++;
+            }
+            log.log("[+] Music: shuffled " + n + " RAW tracks under " + root.getFileName() + ".");
+            return n;
+        } catch (Exception ex) {
+            log.log("[!] Music randomization failed: " + ex.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Shuffle CINE/*.DPS (and any .DPS) FMV payloads. Filenames stay; video data swaps.
+     */
+    public int randomizeVideos(Random rnd, RandomizerOptions options) {
+        try {
+            Path root = options.cdRoot != null ? options.cdRoot : outputRoot;
+            List<Path> vids = findLooseFiles(root, ".DPS");
+            vids = vids.stream()
+                    .filter(p -> {
+                        try {
+                            return Files.size(p) > 8192;
+                        } catch (IOException ex) {
+                            return false;
+                        }
+                    })
+                    .sorted()
+                    .collect(Collectors.toList());
+            if (vids.size() < 2) {
+                log.log("[+] Videos: need >=2 .DPS under CD (found " + vids.size()
+                        + "). Copy CINE/ folder onto the CD path.");
+                return 0;
+            }
+            List<byte[]> contents = new ArrayList<>();
+            for (Path p : vids) {
+                contents.add(Files.readAllBytes(p));
+            }
+            Collections.shuffle(contents, rnd);
+            int n = 0;
+            for (int i = 0; i < vids.size(); i++) {
+                Files.write(vids.get(i), contents.get(i));
+                n++;
+            }
+            log.log("[+] Videos: shuffled " + n + " DPS cinematics under " + root.getFileName() + ".");
+            return n;
+        } catch (Exception ex) {
+            log.log("[!] Video randomization failed: " + ex.getMessage());
+            return 0;
+        }
+    }
+
+    private List<Path> findLooseFiles(Path root, String extension) throws IOException {
+        String ext = extension.toUpperCase(Locale.ROOT);
+        if (!Files.exists(root)) {
+            return List.of();
+        }
+        try (Stream<Path> walk = Files.walk(root, 6)) {
+            return walk.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().toUpperCase(Locale.ROOT).endsWith(ext))
+                    .collect(Collectors.toList());
+        }
     }
 
     public void exportForPc() {
