@@ -61,3 +61,15 @@ src/com/serifsystemworks/darkstone/
 PSM/               Reference archives
 build.bat / run.bat
 ```
+
+## Format documentation
+
+See **[HEX_LIST.md](HEX_LIST.md)** for PSM TOC layout, FE map objects, TIM/CLUT, QUEST$ loot, and boot-safety notes.
+
+
+## PC Randomizer (shelved)
+
+PC campaign `DATA.MTF` cannot be safely size-edited with current MTF tools (repacks grow and fail to boot). The PC dump is retained as a **name/structure reference** only.
+
+See **[CROSSWALK_PC_PSX.md](CROSSWALK_PC_PSX.md)** for crystals, keys, and quest IDs applied to the **PSX** randomizer.
+PC sources remain under `pc/` for archival use.

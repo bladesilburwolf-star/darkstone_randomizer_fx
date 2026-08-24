@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
@@ -119,6 +120,35 @@ public final class RandomizerEngine {
      * Strategy: collect ITEM_* slots (except DROP/PICK/USE), keep KEY/CLEF protected
      * by default, and reassign names from the pool into slots they fit.
      */
+
+    /**
+     * Progression / softlock items — shared naming with PC SCRIPT exports.
+     * Never shuffle these as generic loot.
+     */
+    static boolean isProgressionItem(String name) {
+        if (name == null) {
+            return true;
+        }
+        String u = name.toUpperCase(java.util.Locale.ROOT);
+        if (u.equals("ITEM_DROP") || u.equals("ITEM_PICK") || u.equals("ITEM_USE")) {
+            return true;
+        }
+        if (u.contains("KEY") || u.contains("CLEF") || u.contains("FALSEKEY")) {
+            return true;
+        }
+        if (u.contains("CRISTAL") || u.contains("CRYSTAL")) {
+            return true;
+        }
+        if (u.contains("DRAAK") || u.contains("VIRTUAL") || u.contains("QFINAL")) {
+            return true;
+        }
+        if (u.contains("MIRROIR") || u.contains("PRISME") || u.contains("COUFFIN")
+                || u.equals("ITEM_AMULET_KALIBA") || u.equals("ITEM_CLEF_DRAAK")) {
+            return true;
+        }
+        return false;
+    }
+
     public int randomizeLoot(Random rnd) {
         try {
             int questSlots = randomizeQuestItemLoot(rnd);
@@ -201,9 +231,9 @@ public final class RandomizerEngine {
                 if (sys) {
                     continue;
                 }
-                // Protect keys / critical quest gates by default
-                String u = name.toUpperCase(Locale.ROOT);
-                if (u.contains("KEY") || u.contains("CLEF") || u.contains("FALSEKEY")) {
+                // Protect progression items (PC SCRIPT crosswalk + PSX QUEST$).
+                // Crystals, Draak key, virtual flags, keys/clefs must never be loot-shuffled.
+                if (isProgressionItem(name)) {
                     continue;
                 }
                 int off = m.start();
@@ -832,107 +862,215 @@ public final class RandomizerEngine {
 
 
     /**
-     * Dungeon / land shuffle for LAND* (overworld) and LEVEL* (QUEST0/1/2 interiors).
+     * Tightened dungeon / land shuffle.
      * <ul>
-     *   <li>Within each archive: shuffle same-size FE blobs (56-byte headers + larger objects)</li>
-     *   <li>Optional cross-land: pool all 56-byte FE headers across LAND* and reshuffle</li>
+     *   <li>LAND* overworld: per-pack same-size FE (56 + known prop sizes); optional cross-land FE56</li>
+     *   <li>LEVEL* interiors: per-pack FE + room templates; optional cross within QUEST0/1/2 tier only</li>
+     *   <li>LEVEL29/30 and DRAAK excluded unless dungeonsFinal</li>
+     *   <li>Cross-land never mixes LAND tiles with dungeon interiors</li>
+     *   <li>Only known interior template sizes are shuffled (avoids unique critical blobs)</li>
      * </ul>
-     * Size is always preserved so PSM in-place patch stays valid.
      */
     public int randomizeDungeons(Random rnd, RandomizerOptions options) {
         try {
-            List<Path> landFolders = findLandFolders();
-            if (landFolders.isEmpty()) {
-                // fall back: any unpacked folder with many FE-56 blobs
-                landFolders = findFoldersWithFeMaps(8);
+            List<Path> allFolders = findLandFolders();
+            if (allFolders.isEmpty()) {
+                allFolders = findFoldersWithFeMaps(8);
             }
-            if (landFolders.isEmpty()) {
+            if (allFolders.isEmpty()) {
                 log.log("[+] Dungeons: no LAND*/LEVEL* folders found (unpack LANDS + QUEST0/1/2 first).");
                 return 0;
             }
 
-            int total = 0;
-            List<Path> allFe56 = new ArrayList<>();
-
-            for (Path folder : landFolders) {
-                Map<Long, List<Path>> bySize = new HashMap<>();
-                try (Stream<Path> list = Files.list(folder)) {
-                    for (Path p : list.filter(Files::isRegularFile)
-                            .filter(f -> f.getFileName().toString().endsWith(".bin"))
-                            .toList()) {
-                        byte[] b = Files.readAllBytes(p);
-                        if (b.length < 56 || b.length > 200_000) {
-                            continue; // skip tiny noise and huge mesh/texture blobs
-                        }
-                        boolean isFe = b[0] == (byte) 0xFE;
-                        // Interior room/prop templates common in QUEST LEVEL packs
-                        boolean isInteriorTemplate = b.length == 664 || b.length == 948
-                                || b.length == 1332 || b.length == 1562
-                                || b.length == 304 || b.length == 1252;
-                        if (isFe || isInteriorTemplate) {
-                            bySize.computeIfAbsent((long) b.length, k -> new ArrayList<>()).add(p);
-                            if (isFe && b.length == 56) {
-                                allFe56.add(p);
-                            }
-                        }
-                    }
-                }
-
-                int folderCount = 0;
-                for (Map.Entry<Long, List<Path>> e : bySize.entrySet()) {
-                    List<Path> group = e.getValue();
-                    if (group.size() < 2) {
+            List<Path> landFolders = new ArrayList<>();
+            List<Path> levelFolders = new ArrayList<>();
+            for (Path folder : allFolders) {
+                String n = folder.getFileName().toString().toUpperCase(Locale.ROOT);
+                if (n.startsWith("LAND")) {
+                    landFolders.add(folder);
+                } else if (n.startsWith("LEVEL") || n.startsWith("DRAAK")) {
+                    if (isFinalDungeonFolder(n) && !options.dungeonsFinal) {
                         continue;
                     }
-                    // When cross-land is on, skip local 56-byte shuffle (done globally later)
-                    if (options.dungeonsCrossLand && e.getKey() == 56L) {
-                        continue;
-                    }
-                    List<byte[]> contents = new ArrayList<>();
-                    for (Path p : group) {
-                        contents.add(Files.readAllBytes(p));
-                    }
-                    Collections.shuffle(contents, rnd);
-                    for (int i = 0; i < group.size(); i++) {
-                        if (writePatched(group.get(i), contents.get(i))) {
-                            folderCount++;
-                        }
+                    if (options.dungeonsInteriors) {
+                        levelFolders.add(folder);
                     }
                 }
-                if (folderCount > 0) {
-                    log.log("    " + folder.getFileName() + ": shuffled " + folderCount + " FE objects");
-                }
-                total += folderCount;
             }
 
-            if (options.dungeonsCrossLand && allFe56.size() >= 2) {
-                List<byte[]> contents = new ArrayList<>();
-                for (Path p : allFe56) {
-                    contents.add(Files.readAllBytes(p));
+            int total = 0;
+            List<Path> landFe56 = new ArrayList<>();
+            // tier -> FE56 paths for optional cross-interior
+            Map<String, List<Path>> tierFe56 = new HashMap<>();
+
+            // --- Overworld LAND* ---
+            for (Path folder : landFolders) {
+                int n = shuffleFolderMapObjects(folder, rnd, options, true, landFe56, null);
+                if (n > 0) {
+                    log.log("    " + folder.getFileName() + " (land): " + n + " objects");
                 }
-                Collections.shuffle(contents, rnd);
-                int n = 0;
-                for (int i = 0; i < allFe56.size(); i++) {
-                    if (writePatched(allFe56.get(i), contents.get(i))) {
-                        n++;
-                    }
-                }
-                log.log("    cross-land: shuffled " + n + " x 56-byte FE headers across lands");
                 total += n;
             }
 
-            long levelFolders = landFolders.stream()
-                    .filter(p -> p.getFileName().toString().toUpperCase(Locale.ROOT).startsWith("LEVEL"))
-                    .count();
-            long landOnly = landFolders.size() - levelFolders;
-            log.log("[+] Dungeons: " + total + " map objects across " + landFolders.size()
-                    + " folder(s) (lands=" + landOnly + ", interiors=" + levelFolders + ")"
-                    + (options.dungeonsCrossLand ? " (cross-pack FE56 on)" : " (per-pack)") + ".");
+            // --- Dungeon LEVEL* ---
+            for (Path folder : levelFolders) {
+                String tier = questTierOf(folder);
+                List<Path> sink = options.dungeonsCrossInterior
+                        ? tierFe56.computeIfAbsent(tier, k -> new ArrayList<>())
+                        : null;
+                int n = shuffleFolderMapObjects(folder, rnd, options, false, null, sink);
+                if (n > 0) {
+                    log.log("    " + folder.getFileName() + " (interior/" + tier + "): " + n + " objects");
+                }
+                total += n;
+            }
+
+            // Cross-land: LAND FE56 only
+            if (options.dungeonsCrossLand && landFe56.size() >= 2) {
+                // Re-read after per-pack may have skipped 56s
+                int n = shufflePathContents(landFe56, rnd);
+                log.log("    cross-land: " + n + " x FE56 headers across " + landFolders.size() + " LAND packs");
+                total += n;
+            }
+
+            // Cross-interior: per QUEST tier only
+            if (options.dungeonsCrossInterior) {
+                for (Map.Entry<String, List<Path>> e : tierFe56.entrySet()) {
+                    if (e.getValue().size() < 2) {
+                        continue;
+                    }
+                    int n = shufflePathContents(e.getValue(), rnd);
+                    log.log("    cross-interior [" + e.getKey() + "]: " + n + " x FE56");
+                    total += n;
+                }
+            }
+
+            log.log("[+] Dungeons: " + total + " map objects"
+                    + " (LAND packs=" + landFolders.size()
+                    + ", LEVEL packs=" + levelFolders.size()
+                    + (options.dungeonsCrossLand ? ", cross-land FE56" : "")
+                    + (options.dungeonsCrossInterior ? ", cross-interior FE56 by tier" : "")
+                    + (options.dungeonsFinal ? ", final dungeon on" : ", final dungeon off")
+                    + ").");
             return total;
         } catch (Exception ex) {
             log.log("[!] Dungeon randomization failed: " + ex.getMessage());
             return 0;
         }
+    }
+
+    private static boolean isFinalDungeonFolder(String upperName) {
+        return upperName.startsWith("LEVEL29") || upperName.startsWith("LEVEL30")
+                || upperName.startsWith("DRAAK");
+    }
+
+    /** QUEST0 / QUEST1 / QUEST2 from parent path, else "OTHER". */
+    private static String questTierOf(Path folder) {
+        Path p = folder;
+        for (int i = 0; i < 6 && p != null; i++) {
+            String n = p.getFileName().toString().toUpperCase(Locale.ROOT);
+            if (n.startsWith("QUEST0")) return "QUEST0";
+            if (n.startsWith("QUEST1")) return "QUEST1";
+            if (n.startsWith("QUEST2")) return "QUEST2";
+            if (n.contains("QUEST0")) return "QUEST0";
+            if (n.contains("QUEST1")) return "QUEST1";
+            if (n.contains("QUEST2")) return "QUEST2";
+            p = p.getParent();
+        }
+        return "OTHER";
+    }
+
+    /**
+     * @param landMode true = overworld (collect FE56 into landFe56 when cross-land)
+     * @param landFe56 out sink for land FE56 paths when cross-land enabled
+     * @param tierFe56 out sink for interior FE56 when cross-interior enabled
+     */
+    private int shuffleFolderMapObjects(Path folder, Random rnd, RandomizerOptions options,
+                                        boolean landMode, List<Path> landFe56, List<Path> tierFe56)
+            throws IOException {
+        // Known safe interior template sizes (QUEST LEVEL packs)
+        final Set<Integer> interiorSizes = Set.of(56, 304, 664, 948, 1252, 1332, 1562);
+        // Overworld: FE header 56 + a few repeated prop sizes seen in LAND packs
+        final Set<Integer> landSizes = Set.of(56, 112, 168, 224, 280, 336);
+
+        Map<Long, List<Path>> bySize = new HashMap<>();
+        try (Stream<Path> list = Files.list(folder)) {
+            for (Path p : list.filter(Files::isRegularFile)
+                    .filter(f -> f.getFileName().toString().endsWith(".bin"))
+                    .toList()) {
+                byte[] b = Files.readAllBytes(p);
+                if (b.length < 56 || b.length > 20_000) {
+                    continue;
+                }
+                boolean isFe = b[0] == (byte) 0xFE;
+                if (!isFe && !interiorSizes.contains(b.length) && !landSizes.contains(b.length)) {
+                    continue;
+                }
+                if (landMode) {
+                    if (!isFe && !landSizes.contains(b.length)) {
+                        continue;
+                    }
+                    // Non-56 land FE: only if we have repeated sizes (handled by group size)
+                    if (isFe && b.length != 56 && b.length > 512) {
+                        continue; // large unique FE props stay put
+                    }
+                } else {
+                    // Interiors: FE or known template sizes only
+                    if (!isFe && !interiorSizes.contains(b.length)) {
+                        continue;
+                    }
+                    if (isFe && b.length != 56 && !interiorSizes.contains(b.length)) {
+                        continue;
+                    }
+                }
+                bySize.computeIfAbsent((long) b.length, k -> new ArrayList<>()).add(p);
+                if (isFe && b.length == 56) {
+                    if (landMode && options.dungeonsCrossLand && landFe56 != null) {
+                        landFe56.add(p);
+                    }
+                    if (!landMode && options.dungeonsCrossInterior && tierFe56 != null) {
+                        tierFe56.add(p);
+                    }
+                }
+            }
+        }
+
+        int folderCount = 0;
+        for (Map.Entry<Long, List<Path>> e : bySize.entrySet()) {
+            List<Path> group = e.getValue();
+            if (group.size() < 2) {
+                continue;
+            }
+            // Defer FE56 to cross pass when requested
+            if (e.getKey() == 56L) {
+                if (landMode && options.dungeonsCrossLand) {
+                    continue;
+                }
+                if (!landMode && options.dungeonsCrossInterior) {
+                    continue;
+                }
+            }
+            folderCount += shufflePathContents(group, rnd);
+        }
+        return folderCount;
+    }
+
+    private int shufflePathContents(List<Path> paths, Random rnd) throws IOException {
+        if (paths.size() < 2) {
+            return 0;
+        }
+        List<byte[]> contents = new ArrayList<>(paths.size());
+        for (Path p : paths) {
+            contents.add(Files.readAllBytes(p));
+        }
+        Collections.shuffle(contents, rnd);
+        int n = 0;
+        for (int i = 0; i < paths.size(); i++) {
+            if (writePatched(paths.get(i), contents.get(i))) {
+                n++;
+            }
+        }
+        return n;
     }
 
     private List<Path> findLandFolders() throws IOException {

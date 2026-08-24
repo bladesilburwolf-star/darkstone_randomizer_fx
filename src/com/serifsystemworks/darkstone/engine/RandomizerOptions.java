@@ -9,6 +9,12 @@ public final class RandomizerOptions {
     public boolean maps = false;
     public boolean dungeons = true;
     public boolean dungeonsCrossLand = false;
+    /** Shuffle QUEST LEVEL* interior FE/templates (per pack). */
+    public boolean dungeonsInteriors = true;
+    /** Pool FE56 across LEVEL packs within the same QUEST tier (0/1/2). */
+    public boolean dungeonsCrossInterior = false;
+    /** Include LEVEL29/30 and DRAAK final dungeon packs. */
+    public boolean dungeonsFinal = false;
     public boolean quests = false;
 
     /** Hue-shift or shuffle TIM CLUT colors (textures / models). */

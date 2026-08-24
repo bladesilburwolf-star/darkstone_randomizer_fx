@@ -49,7 +49,7 @@ import java.util.regex.Pattern;
  */
 public final class MainView {
 
-    public static final String VERSION = "3.0.0";
+    public static final String VERSION = "3.1.0";
 
     private final Stage stage;
     private final Preferences prefs = Preferences.userNodeForPackage(MainView.class);
@@ -91,7 +91,10 @@ public final class MainView {
     private final CheckBox chkShops = new CheckBox("Shop prices");
     private final CheckBox chkMaps = new CheckBox("Map headers");
     private final CheckBox chkDungeons = new CheckBox("Land/dungeon tiles");
-    private final CheckBox chkCrossLand = new CheckBox("Cross-pack tiles");
+    private final CheckBox chkCrossLand = new CheckBox("Cross-land FE56");
+    private final CheckBox chkInteriors = new CheckBox("Dungeon interiors");
+    private final CheckBox chkCrossInterior = new CheckBox("Cross-interior (tier)");
+    private final CheckBox chkFinalDungeon = new CheckBox("Final dungeon");
     private final CheckBox chkPalettes = new CheckBox("Palettes (TIM)");
     private final CheckBox chkPalShuffle = new CheckBox("Palette shuffle mode");
     private final CheckBox chkQuests = new CheckBox("Quest items");
@@ -166,6 +169,9 @@ public final class MainView {
         chkMaps.setSelected(false);
         chkDungeons.setSelected(true);
         chkCrossLand.setSelected(false);
+        chkInteriors.setSelected(true);
+        chkCrossInterior.setSelected(false);
+        chkFinalDungeon.setSelected(false);
         chkPalettes.setSelected(false);
         chkPalShuffle.setSelected(false);
         chkQuests.setSelected(false);
@@ -238,6 +244,10 @@ public final class MainView {
         chkSkillLv.setSelected(true);
         chkPlayerLv.setSelected(true);
         chkDungeons.setSelected(true);
+        chkInteriors.setSelected(true);
+        chkCrossLand.setSelected(false);
+        chkCrossInterior.setSelected(false);
+        chkFinalDungeon.setSelected(false);
         chkCopy.setSelected(true);
         chkLoot.setSelected(false);
         chkQuests.setSelected(false);
@@ -264,6 +274,10 @@ public final class MainView {
         chkEnemies.setSelected(true);
         chkShops.setSelected(true);
         chkDungeons.setSelected(true);
+        chkInteriors.setSelected(true);
+        chkCrossLand.setSelected(false);
+        chkCrossInterior.setSelected(false);
+        chkFinalDungeon.setSelected(false);
         chkPalettes.setSelected(true);
         chkMusic.setSelected(true);
         chkCopy.setSelected(true);
@@ -285,6 +299,9 @@ public final class MainView {
         chkVideos.setSelected(false); // shuffle instead of skip
         chkVideoShuffle.setSelected(true);
         chkCrossLand.setSelected(true);
+        chkInteriors.setSelected(true);
+        chkCrossInterior.setSelected(true);
+        chkFinalDungeon.setSelected(false);
         chkPalShuffle.setSelected(true);
         chkForce.setSelected(false);
         statMin.setText("5"); statMax.setText("40");
@@ -311,6 +328,9 @@ public final class MainView {
         chkMaps.setSelected(on);
         chkDungeons.setSelected(on);
         chkCrossLand.setSelected(on);
+        chkInteriors.setSelected(on);
+        chkCrossInterior.setSelected(on);
+        chkFinalDungeon.setSelected(false); // never auto-on even in "all"
         chkPalettes.setSelected(on);
         chkPalShuffle.setSelected(on);
         chkQuests.setSelected(on);
@@ -357,7 +377,7 @@ public final class MainView {
                         chkWeapons, chkSpellLv, chkSkillLv, chkPlayerLv)));
 
         side.getChildren().add(card("World / lands",
-                flow(chkEnemies, chkEnemyLv, chkShops, chkMaps, chkDungeons, chkCrossLand,
+                flow(chkEnemies, chkEnemyLv, chkShops, chkMaps, chkDungeons, chkCrossLand, chkInteriors, chkCrossInterior, chkFinalDungeon,
                         chkPalettes, chkPalShuffle, chkQuests)));
 
         side.getChildren().add(card("Audio / video",
@@ -722,6 +742,9 @@ public final class MainView {
         o.maps = chkMaps.isSelected();
         o.dungeons = chkDungeons.isSelected();
         o.dungeonsCrossLand = chkCrossLand.isSelected();
+        o.dungeonsInteriors = chkInteriors.isSelected();
+        o.dungeonsCrossInterior = chkCrossInterior.isSelected();
+        o.dungeonsFinal = chkFinalDungeon.isSelected();
         o.palettes = chkPalettes.isSelected();
         o.paletteShuffle = chkPalShuffle.isSelected();
         o.quests = chkQuests.isSelected();

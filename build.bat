@@ -18,7 +18,7 @@ javac --release 21 -encoding UTF-8 ^
   -d out ^
   src\com\serifsystemworks\darkstone\DarkstoneApp.java ^
   src\com\serifsystemworks\darkstone\engine\*.java ^
-  src\com\serifsystemworks\darkstone\ui\*.java
+  src\com\serifsystemworks\darkstone\ui\MainView.java
 if errorlevel 1 (
     echo [!] Compilation failed.
     exit /b 1
