@@ -1,0 +1,48 @@
+																																													
+	marteau 1			Epees 1			Epees 2			Arcs			Batons			Gourdins			Sceptre			Dagues			Hache de Jet			masse 1			lances/trident			Hache 1			Hallebarde/faux			Hache 2		Marteau 2		Masse 2	
+	min	max		min	max		min	max		min	max		min	max		min	max		min	max		min	max		min	max		min	max		min	max		min	max		min	max		min	max				
+1	2	10		0	5					0	4		0	3		1	3		1	2		0	4		0	5		2	9		4	6		3	9		4	7							
+2	4	16		3	10					4	8		1	5		3	6		1	3		2	6		3	8		4	14		8	12		4	15		8	14							
+3	6	22		6	15					8	12		2	7		5	9		2	4		4	8		6	11		6	19		12	18		5	21		12	21							
+4	8	28		9	20		24	32		12	16		3	9		7	12		2	5		6	10		9	14		8	24		16	24		6	27		16	28		16	36				
+5	10	34		12	25		30	40		16	20		4	11		9	15		3	6		8	12		12	17		10	29		20	30		7	33		20	35		20	45				
+6	12	40		15	30		36	48		20	24		5	13		11	18		3	7		10	14		15	20		12	34		24	36		8	39		24	42		24	54				
+7	14	46		18	35		42	56		24	28		6	15		13	21		4	8		12	16		18	23		14	39		28	42		9	45		28	49		28	63				
+8	16	52		21	40		48	64		28	32		7	17		15	24		4	9		14	18		21	26		16	44		32	48		10	51		32	56		32	72	40	76		
+9				24	45		54	72		32	36		8	19		17	27		5	10		16	20		24	29		18	49		36	54		11	57		36	63		36	81	45	85		
+10				27	50		60	80		36	40		9	21		19	30		5	11		18	22		27	32		20	54		40	60		12	63		40	70		40	90	50	94		
+11				30	55		66	88																																44	99	55	103		
+12				33	60		72	96																																48	108	60	112		
+13																																												65	121
+13										
+14										
+15										
+16										
+17										
+18										
+19										
+20										
+21										
+
+
+
+
+
+	arcs	10		armures	15		guerrier	voleur	pretre	sorcier
+	epees 1	12		boucliers	8		epees 1	arcs	batons	sceptre
+	batons	10		casques	8		epees 2	dagues	gourdins												
+	dagues	5					hache 1	hache jet	marteau 1												
+	epees 2	9					hache 2		marteau 2												
+	"""faux"	5					lances		masse 2												
+	gourdins	10					trident		hallebarde												
+	hache 1	4							"""faux"												
+	hache 2	4																			
+	hache jet	5																			
+	hallebarde	5					ordre														
+	lances	5					epees 1	hache 1	lances	batons	gourdins	marteau 1	masse 2	arcs	dagues	sceptre	masse 1				
+	marteau 1	5					epees 2	hache 2	trident			marteau 2			hache jet						
+	marteau 2	5							hallebarde												
+	masse 2	5							"""faux"												
+	sceptre	10																			
+	trident	5																			
+				sceptre	batons	dagues	gourdins	hache jet	arcs	epees 1	masse 1	lances	hache 1	trident	marteau 1	hallebarde	"""faux"	epees 2	hache 2	marteau 2	masse 2

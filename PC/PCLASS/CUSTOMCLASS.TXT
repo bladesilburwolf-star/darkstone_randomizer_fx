@@ -1,0 +1,3 @@
+customLevelName	caverne	trone	END			
+QuestObjectCustomRoom	quest1	quest2	quest3	quest4	quest5	quest6	quest7	quest8	END
+LandCustomRoom	camp	village	enclos	dolmen	END	
