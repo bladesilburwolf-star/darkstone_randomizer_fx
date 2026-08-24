@@ -11,6 +11,15 @@ public final class RandomizerOptions {
     public boolean dungeonsCrossLand = false;
     public boolean quests = false;
 
+    /** Hue-shift or shuffle TIM CLUT colors (textures / models). */
+    public boolean palettes = true;
+    /** When true, shuffle CLUT entries; when false, hue-rotate RGB555. */
+    public boolean paletteShuffle = false;
+    /** Hue shift degrees 0-360 range for random pick when not shuffle. */
+    public int paletteHueMin = 30;
+    public int paletteHueMax = 330;
+
+
     // Character start
     public boolean startingGear = true;
     public boolean startingGold = true;

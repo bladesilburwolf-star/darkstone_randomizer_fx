@@ -92,6 +92,9 @@ public final class RandomizerEngine {
         if (options.dungeons) {
             randomizeDungeons(rnd, options);
         }
+        if (options.palettes) {
+            randomizePalettes(rnd, options);
+        }
         if (options.quests) {
             randomizeQuests(rnd);
         }
@@ -103,23 +106,167 @@ public final class RandomizerEngine {
         log.log("=================================================");
     }
 
+    /**
+     * Real loot lives in QUEST$ (AL*_Q*.PSM): ITEM_* name slots for quest rewards,
+     * chest contents, and pickups. DATA1 64-byte pools were almost empty noise.
+     * <p>
+     * Strategy: collect ITEM_* slots (except DROP/PICK/USE), keep KEY/CLEF protected
+     * by default, and reassign names from the pool into slots they fit.
+     */
     public int randomizeLoot(Random rnd) {
         try {
+            int questSlots = randomizeQuestItemLoot(rnd);
+            int pools = 0;
             List<Path> lootFiles = findMatching(p -> TableScanner.isLoot(Files.readAllBytes(p)));
-            int patched = 0;
             for (Path p : lootFiles) {
                 byte[] data = Files.readAllBytes(p);
                 shuffleBytes(data, rnd);
                 if (writePatched(p, data)) {
-                    patched++;
+                    pools++;
                 }
             }
-            log.log("[+] Loot randomization: shuffled " + patched + "/" + lootFiles.size() + " loot pools.");
-            return patched;
+            if (pools > 0) {
+                log.log("[+] Loot (legacy pools): shuffled " + pools + " DATA-style 64-byte pools.");
+            }
+            log.log("[+] Loot: " + questSlots + " QUEST$ ITEM slots reassigned"
+                    + (pools > 0 ? " + " + pools + " legacy pools" : "") + ".");
+            return questSlots + pools;
         } catch (Exception e) {
             log.log("[!] Loot randomization failed: " + e.getMessage());
             return 0;
         }
+    }
+
+    private int randomizeQuestItemLoot(Random rnd) throws Exception {
+        // Prefer bins under QUEST$-style packs: AL*_Q*, AQFINAL, or any bin with many ITEM_
+        List<Path> candidates = findMatching(p -> {
+            String name = p.getFileName().toString().toUpperCase(Locale.ROOT);
+            String parent = p.getParent() != null
+                    ? p.getParent().getFileName().toString().toUpperCase(Locale.ROOT) : "";
+            if (parent.contains("QUEST") || parent.startsWith("AL") || parent.startsWith("AQ")) {
+                return true;
+            }
+            byte[] b = Files.readAllBytes(p);
+            if (b.length > 200_000) return false;
+            String t = TableScanner.latin1(b);
+            int c = 0;
+            int i = 0;
+            while ((i = t.indexOf("ITEM_", i)) >= 0) {
+                c++;
+                i += 5;
+                if (c >= 3) return true;
+            }
+            return false;
+        });
+
+        final String[] SYSTEM = {"ITEM_DROP", "ITEM_PICK", "ITEM_USE"};
+        java.util.regex.Pattern itemPat = java.util.regex.Pattern.compile("ITEM_[A-Z0-9_]+");
+
+        class Slot {
+            final Path file;
+            final int offset;
+            final String name;
+            final int capacity; // max bytes for name + nulls we can overwrite
+
+            Slot(Path file, int offset, String name, int capacity) {
+                this.file = file;
+                this.offset = offset;
+                this.name = name;
+                this.capacity = capacity;
+            }
+        }
+
+        List<Slot> slots = new ArrayList<>();
+        Map<Path, byte[]> fileData = new HashMap<>();
+
+        for (Path p : candidates) {
+            byte[] data = Files.readAllBytes(p);
+            String text = new String(data, java.nio.charset.StandardCharsets.US_ASCII);
+            java.util.regex.Matcher m = itemPat.matcher(text);
+            while (m.find()) {
+                String name = m.group();
+                boolean sys = false;
+                for (String s : SYSTEM) {
+                    if (s.equals(name)) {
+                        sys = true;
+                        break;
+                    }
+                }
+                if (sys) {
+                    continue;
+                }
+                // Protect keys / critical quest gates by default
+                String u = name.toUpperCase(Locale.ROOT);
+                if (u.contains("KEY") || u.contains("CLEF") || u.contains("FALSEKEY")) {
+                    continue;
+                }
+                int off = m.start();
+                int end = m.end();
+                int nulls = 0;
+                while (end + nulls < data.length && data[end + nulls] == 0) {
+                    nulls++;
+                }
+                // Allow writing up to name length + trailing nulls (at least name+1)
+                int capacity = Math.max(name.length() + 1, name.length() + nulls);
+                // Cap at 32-byte style fields common in this game
+                capacity = Math.min(capacity, 32);
+                if (capacity < 8) {
+                    continue;
+                }
+                slots.add(new Slot(p, off, name, capacity));
+                fileData.put(p, data);
+            }
+        }
+
+        if (slots.size() < 2) {
+            log.log("[+] Loot (QUEST$): not enough ITEM slots (" + slots.size() + ").");
+            return 0;
+        }
+
+        // Build pool of unique names
+        List<String> pool = slots.stream().map(s -> s.name).distinct().collect(Collectors.toList());
+        int changed = 0;
+        Map<Path, Boolean> dirty = new HashMap<>();
+
+        for (Slot slot : slots) {
+            // Prefer a different name that fits
+            List<String> fits = new ArrayList<>();
+            for (String n : pool) {
+                if (n.length() + 1 <= slot.capacity) {
+                    fits.add(n);
+                }
+            }
+            if (fits.isEmpty()) {
+                continue;
+            }
+            String pick = fits.get(rnd.nextInt(fits.size()));
+            // mild bias: avoid always same
+            if (pick.equals(slot.name) && fits.size() > 1) {
+                pick = fits.get(rnd.nextInt(fits.size()));
+            }
+            if (pick.equals(slot.name)) {
+                continue;
+            }
+            byte[] data = fileData.get(slot.file);
+            // clear field and write
+            for (int i = 0; i < slot.capacity && slot.offset + i < data.length; i++) {
+                data[slot.offset + i] = 0;
+            }
+            byte[] raw = pick.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+            int n = Math.min(raw.length, slot.capacity - 1);
+            System.arraycopy(raw, 0, data, slot.offset, n);
+            dirty.put(slot.file, true);
+            changed++;
+        }
+
+        int files = 0;
+        for (Map.Entry<Path, Boolean> e : dirty.entrySet()) {
+            if (e.getValue() && writePatched(e.getKey(), fileData.get(e.getKey()))) {
+                files++;
+            }
+        }
+        log.log("[+] Loot (QUEST$): " + changed + " ITEM slots in " + files + " blobs (keys protected).");
+        return changed;
     }
 
     public int randomizeEnemies(Random rnd) {
@@ -679,7 +826,7 @@ public final class RandomizerEngine {
 
 
     /**
-     * Dungeon / land shuffle for LAND*_unpacked (and any folder rich in FE map objects).
+     * Dungeon / land shuffle for LAND* (overworld) and LEVEL* (QUEST0/1/2 interiors).
      * <ul>
      *   <li>Within each archive: shuffle same-size FE blobs (56-byte headers + larger objects)</li>
      *   <li>Optional cross-land: pool all 56-byte FE headers across LAND* and reshuffle</li>
@@ -694,7 +841,7 @@ public final class RandomizerEngine {
                 landFolders = findFoldersWithFeMaps(8);
             }
             if (landFolders.isEmpty()) {
-                log.log("[+] Dungeons: no LAND* / FE-map folders found (unpack LANDS first).");
+                log.log("[+] Dungeons: no LAND*/LEVEL* folders found (unpack LANDS + QUEST0/1/2 first).");
                 return 0;
             }
 
@@ -708,9 +855,17 @@ public final class RandomizerEngine {
                             .filter(f -> f.getFileName().toString().endsWith(".bin"))
                             .toList()) {
                         byte[] b = Files.readAllBytes(p);
-                        if (b.length >= 56 && b[0] == (byte) 0xFE) {
+                        if (b.length < 56 || b.length > 200_000) {
+                            continue; // skip tiny noise and huge mesh/texture blobs
+                        }
+                        boolean isFe = b[0] == (byte) 0xFE;
+                        // Interior room/prop templates common in QUEST LEVEL packs
+                        boolean isInteriorTemplate = b.length == 664 || b.length == 948
+                                || b.length == 1332 || b.length == 1562
+                                || b.length == 304 || b.length == 1252;
+                        if (isFe || isInteriorTemplate) {
                             bySize.computeIfAbsent((long) b.length, k -> new ArrayList<>()).add(p);
-                            if (b.length == 56) {
+                            if (isFe && b.length == 56) {
                                 allFe56.add(p);
                             }
                         }
@@ -760,9 +915,13 @@ public final class RandomizerEngine {
                 total += n;
             }
 
+            long levelFolders = landFolders.stream()
+                    .filter(p -> p.getFileName().toString().toUpperCase(Locale.ROOT).startsWith("LEVEL"))
+                    .count();
+            long landOnly = landFolders.size() - levelFolders;
             log.log("[+] Dungeons: " + total + " map objects across " + landFolders.size()
-                    + " land folder(s)"
-                    + (options.dungeonsCrossLand ? " (cross-land FE56 on)" : " (per-land)") + ".");
+                    + " folder(s) (lands=" + landOnly + ", interiors=" + levelFolders + ")"
+                    + (options.dungeonsCrossLand ? " (cross-pack FE56 on)" : " (per-pack)") + ".");
             return total;
         } catch (Exception ex) {
             log.log("[!] Dungeon randomization failed: " + ex.getMessage());
@@ -772,11 +931,13 @@ public final class RandomizerEngine {
 
     private List<Path> findLandFolders() throws IOException {
         List<Path> out = new ArrayList<>();
-        try (Stream<Path> walk = Files.walk(outputRoot, 6)) {
+        try (Stream<Path> walk = Files.walk(outputRoot, 8)) {
             walk.filter(Files::isDirectory)
                     .filter(p -> {
                         String n = p.getFileName().toString().toUpperCase(Locale.ROOT);
-                        return n.startsWith("LAND") && n.endsWith("_UNPACKED");
+                        // LAND outdoor + QUEST interior LEVEL packs
+                        return n.endsWith("_UNPACKED")
+                                && (n.startsWith("LAND") || n.startsWith("LEVEL"));
                     })
                     .sorted()
                     .forEach(out::add);
@@ -804,6 +965,181 @@ public final class RandomizerEngine {
             }
         }
         return out;
+    }
+
+
+    /**
+     * Palette randomizer: find PSX TIM textures with CLUT (16 or 256 RGB555 colors)
+     * and either hue-rotate or shuffle entries. Color 0 is left alone (often transparent).
+     * Works on whole-bin TIMs (DATA2/TOWN) and embedded TIMs (LAND texture packs).
+     */
+    public int randomizePalettes(Random rnd, RandomizerOptions options) {
+        try {
+            int files = 0;
+            int cluts = 0;
+            int colors = 0;
+            try (Stream<Path> walk = Files.walk(outputRoot)) {
+                List<Path> bins = walk.filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().endsWith(".bin"))
+                        .filter(p -> !p.getFileName().toString().startsWith("_"))
+                        .collect(Collectors.toList());
+                for (Path p : bins) {
+                    byte[] data = Files.readAllBytes(p);
+                    if (data.length < 32) {
+                        continue;
+                    }
+                    List<int[]> clutRanges = findTimCluts(data);
+                    if (clutRanges.isEmpty()) {
+                        continue;
+                    }
+                    int fileColors = 0;
+                    for (int[] range : clutRanges) {
+                        int off = range[0];
+                        int n = range[1];
+                        int hue = options.randomIn(rnd, options.paletteHueMin, options.paletteHueMax);
+                        if (options.paletteShuffle) {
+                            fileColors += shuffleClut(data, off, n, rnd);
+                        } else {
+                            fileColors += hueShiftClut(data, off, n, hue);
+                        }
+                        cluts++;
+                    }
+                    if (fileColors > 0 && writePatched(p, data)) {
+                        files++;
+                        colors += fileColors;
+                    }
+                }
+            }
+            log.log("[+] Palettes: " + cluts + " CLUTs / " + colors + " colors in " + files
+                    + " files (" + (options.paletteShuffle ? "shuffle" : "hue-shift") + ").");
+            return colors;
+        } catch (Exception ex) {
+            log.log("[!] Palette randomization failed: " + ex.getMessage());
+            return 0;
+        }
+    }
+
+    /** Returns list of {clutByteOffset, colorCount} for valid TIM CLUTs in data. */
+    private static List<int[]> findTimCluts(byte[] data) {
+        List<int[]> out = new ArrayList<>();
+        // TIM magic may appear on any alignment inside texture packs
+        int i = 0;
+        while (i + 20 < data.length) {
+            if (data[i] == 0x10 && data[i + 1] == 0 && data[i + 2] == 0 && data[i + 3] == 0) {
+                int flags = (data[i + 4] & 0xFF)
+                        | ((data[i + 5] & 0xFF) << 8)
+                        | ((data[i + 6] & 0xFF) << 16)
+                        | ((data[i + 7] & 0xFF) << 24);
+                boolean hasClut = (flags & 8) != 0;
+                int bpp = flags & 7;
+                if (hasClut && bpp <= 1) {
+                    int pos = i + 8;
+                    if (pos + 12 <= data.length) {
+                        int clutLen = (data[pos] & 0xFF)
+                                | ((data[pos + 1] & 0xFF) << 8)
+                                | ((data[pos + 2] & 0xFF) << 16)
+                                | ((data[pos + 3] & 0xFF) << 24);
+                        int w = (data[pos + 8] & 0xFF) | ((data[pos + 9] & 0xFF) << 8);
+                        int h = (data[pos + 10] & 0xFF) | ((data[pos + 11] & 0xFF) << 8);
+                        int n = w * h;
+                        int clutOff = pos + 12;
+                        if (clutLen >= 12 && n >= 16 && n <= 256
+                                && clutOff + n * 2 <= data.length
+                                && pos + clutLen <= data.length) {
+                            out.add(new int[]{clutOff, n});
+                            i = Math.max(i + 1, pos + clutLen);
+                            continue;
+                        }
+                    }
+                }
+            }
+            i++;
+        }
+        return out;
+    }
+
+    private static int shuffleClut(byte[] data, int off, int n, Random rnd) {
+        // Keep index 0 fixed; shuffle the rest
+        List<Integer> colors = new ArrayList<>(n - 1);
+        for (int i = 1; i < n; i++) {
+            int c = (data[off + i * 2] & 0xFF) | ((data[off + i * 2 + 1] & 0xFF) << 8);
+            colors.add(c);
+        }
+        Collections.shuffle(colors, rnd);
+        for (int i = 1; i < n; i++) {
+            int c = colors.get(i - 1);
+            data[off + i * 2] = (byte) (c & 0xFF);
+            data[off + i * 2 + 1] = (byte) ((c >> 8) & 0xFF);
+        }
+        return n - 1;
+    }
+
+    private static int hueShiftClut(byte[] data, int off, int n, int hueDegrees) {
+        int changed = 0;
+        for (int i = 0; i < n; i++) {
+            int c = (data[off + i * 2] & 0xFF) | ((data[off + i * 2 + 1] & 0xFF) << 8);
+            if (i == 0 && c == 0) {
+                continue; // transparent / black key
+            }
+            int nc = hueShiftRgb555(c, hueDegrees);
+            if (nc != c) {
+                data[off + i * 2] = (byte) (nc & 0xFF);
+                data[off + i * 2 + 1] = (byte) ((nc >> 8) & 0xFF);
+                changed++;
+            }
+        }
+        return changed;
+    }
+
+    /** PSX RGB555: R 0-4, G 5-9, B 10-14, STP 15. */
+    private static int hueShiftRgb555(int color, int hueDegrees) {
+        int r = color & 0x1F;
+        int g = (color >> 5) & 0x1F;
+        int b = (color >> 10) & 0x1F;
+        int stp = color & 0x8000;
+        if (r == 0 && g == 0 && b == 0) {
+            return color;
+        }
+        float rf = r / 31f;
+        float gf = g / 31f;
+        float bf = b / 31f;
+        float max = Math.max(rf, Math.max(gf, bf));
+        float min = Math.min(rf, Math.min(gf, bf));
+        float delta = max - min;
+        float h;
+        if (delta < 1e-6f) {
+            h = 0f;
+        } else if (max == rf) {
+            h = 60f * (((gf - bf) / delta) % 6f);
+        } else if (max == gf) {
+            h = 60f * (((bf - rf) / delta) + 2f);
+        } else {
+            h = 60f * (((rf - gf) / delta) + 4f);
+        }
+        if (h < 0) {
+            h += 360f;
+        }
+        float s = max <= 0 ? 0 : delta / max;
+        float v = max;
+        h = (h + hueDegrees) % 360f;
+        if (h < 0) {
+            h += 360f;
+        }
+        // HSV -> RGB
+        float c = v * s;
+        float x = c * (1 - Math.abs((h / 60f) % 2 - 1));
+        float m = v - c;
+        float rr, gg, bb;
+        if (h < 60) { rr = c; gg = x; bb = 0; }
+        else if (h < 120) { rr = x; gg = c; bb = 0; }
+        else if (h < 180) { rr = 0; gg = c; bb = x; }
+        else if (h < 240) { rr = 0; gg = x; bb = c; }
+        else if (h < 300) { rr = x; gg = 0; bb = c; }
+        else { rr = c; gg = 0; bb = x; }
+        int nr = Math.max(0, Math.min(31, Math.round((rr + m) * 31)));
+        int ng = Math.max(0, Math.min(31, Math.round((gg + m) * 31)));
+        int nb = Math.max(0, Math.min(31, Math.round((bb + m) * 31)));
+        return stp | (nb << 10) | (ng << 5) | nr;
     }
 
     public void exportForPc() {

@@ -18,7 +18,7 @@ Edit `JFX_HOME` in `build.bat` / `run.bat` if needed.
 3. Set **CD** and **Out**, **Unpack**, then **Randomize** (Copy to CD on).
 4. Rebuild the ISO with **CDImg** and boot that image — folder boot is not supported.
 
-## UI (v2.3)
+## UI (v2.5)
 
 Left sidebar:
 
@@ -42,6 +42,8 @@ One log panel on the right.
 | Enemy levels | Combat fields in templates in **level range** |
 | Swap enemies | Same-size template shuffle |
 | Shops / maps / quests | Optional; maps/quests can break progression |
+| **Land/dungeon tiles** | FE objects + room templates in LAND* and QUEST0/1/2 LEVEL* |
+| **Palettes (TIM)** | Hue-shift or shuffle RGB555 CLUTs on textures (DATA2/TOWN/LAND) |
 | **Dungeons** | Shuffle FE map objects in LAND* (per-land or cross-land 56-byte) |
 | Disable videos | Renames `.STR`/`.XA`/`*INTRO*`/`*MOVIE*` → `*.vidbak` |
 

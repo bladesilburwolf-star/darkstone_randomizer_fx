@@ -42,7 +42,7 @@ import java.util.prefs.Preferences;
 
 public final class MainView {
 
-    public static final String VERSION = "2.3.1";
+    public static final String VERSION = "2.5.1";
 
     private final Stage stage;
     private final Preferences prefs = Preferences.userNodeForPackage(MainView.class);
@@ -68,7 +68,7 @@ public final class MainView {
     private final TextField weaponMin = rangeField("3");
     private final TextField weaponMax = rangeField("25");
 
-    private final CheckBox chkLoot = new CheckBox("Loot tables");
+    private final CheckBox chkLoot = new CheckBox("Loot (QUEST$ items)");
     private final CheckBox chkHeroes = new CheckBox("Hero attributes");
     private final CheckBox chkGear = new CheckBox("Start gear");
     private final CheckBox chkGold = new CheckBox("Start gold");
@@ -81,8 +81,10 @@ public final class MainView {
     private final CheckBox chkEnemies = new CheckBox("Enemy templates");
     private final CheckBox chkShops = new CheckBox("Shop prices");
     private final CheckBox chkMaps = new CheckBox("Map headers");
-    private final CheckBox chkDungeons = new CheckBox("Land tiles (FE)");
-    private final CheckBox chkCrossLand = new CheckBox("Cross-land tiles");
+    private final CheckBox chkDungeons = new CheckBox("Land/dungeon tiles");
+    private final CheckBox chkCrossLand = new CheckBox("Cross-pack tiles");
+    private final CheckBox chkPalettes = new CheckBox("Palettes (TIM)");
+    private final CheckBox chkPalShuffle = new CheckBox("Palette shuffle mode");
     private final CheckBox chkQuests = new CheckBox("Quest items");
     private final CheckBox chkVideos = new CheckBox("Skip videos");
     private final CheckBox chkCopy = new CheckBox("Install to CD");
@@ -142,6 +144,8 @@ public final class MainView {
         chkMaps.setSelected(false);
         chkDungeons.setSelected(true);
         chkCrossLand.setSelected(false);
+        chkPalettes.setSelected(true);
+        chkPalShuffle.setSelected(false);
         chkQuests.setSelected(false);
         chkVideos.setSelected(false);
         chkCopy.setSelected(true);
@@ -201,7 +205,8 @@ public final class MainView {
                         chkWeapons, chkSpellLv, chkSkillLv, chkPlayerLv)));
 
         side.getChildren().add(card("World / lands",
-                flow(chkEnemies, chkEnemyLv, chkShops, chkMaps, chkDungeons, chkCrossLand, chkQuests)));
+                flow(chkEnemies, chkEnemyLv, chkShops, chkMaps, chkDungeons, chkCrossLand,
+                        chkPalettes, chkPalShuffle, chkQuests)));
 
         side.getChildren().add(card("Install",
                 flow(chkCopy, chkVideos)));
@@ -456,6 +461,8 @@ public final class MainView {
         o.maps = chkMaps.isSelected();
         o.dungeons = chkDungeons.isSelected();
         o.dungeonsCrossLand = chkCrossLand.isSelected();
+        o.palettes = chkPalettes.isSelected();
+        o.paletteShuffle = chkPalShuffle.isSelected();
         o.quests = chkQuests.isSelected();
         o.disableVideos = chkVideos.isSelected();
         o.copyToCd = chkCopy.isSelected();
@@ -555,7 +562,7 @@ public final class MainView {
     private void logStartup() {
         logSink.log("Darkstone PSX Randomizer " + VERSION);
         logSink.log("Workflow: Unpack → Randomize → Install → rebuild ISO with CDImg.");
-        logSink.log("Land tiles (FE): shuffles terrain objects per land. Cross-land mixes tiles between lands.");
+        logSink.log("Land/dungeon tiles: FE + room templates in LAND* and QUEST LEVEL*. Cross-pack mixes 56-byte FE across packs.");
     }
 
     private void alert(Alert.AlertType type, String message) {
