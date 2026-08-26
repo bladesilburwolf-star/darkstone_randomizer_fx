@@ -12,7 +12,7 @@ import java.util.stream.Stream;
 /**
  * Installs patched PSM archives back onto an extracted CD folder.
  * Prefers in-place {@code _source.psm} copies (header-preserving).
- * Falls back to {@code *.PSM.repacked} when present.
+ * Also copies any legacy {@code *.PSM.repacked} as {@code *.PSM}.
  */
 public final class CdInstaller {
 

@@ -4,50 +4,53 @@ public final class RandomizerOptions {
     // Core
     public boolean loot = false;
     public boolean enemies = false;
+    /** Shuffle MO_* encounter name slots (enemy types per land / level). */
+    public boolean enemyTypes = true;
     public boolean heroes = true;
     public boolean shops = false;
     public boolean maps = false;
+
+    /** Overworld LAND FE tiles + structural props. */
     public boolean dungeons = true;
     public boolean dungeonsCrossLand = false;
-    /** Shuffle QUEST LEVEL* interior FE/templates (per pack). */
-    public boolean dungeonsInteriors = true;
-    /** Pool FE56 across LEVEL packs within the same QUEST tier (0/1/2). */
-    public boolean dungeonsCrossInterior = false;
-    /** Include LEVEL29/30 and DRAAK final dungeon packs. */
+    /**
+     * Dungeon doors: cross-land shuffle of fixed-count structural FE props
+     * (replaces ineffective interior / cross-interior modes).
+     */
+    public boolean dungeonDoors = true;
+    /** Include LEVEL29/30 and DRAAK final packs in door/prop pools when true. */
     public boolean dungeonsFinal = false;
+
+    @Deprecated public boolean dungeonsInteriors = false;
+    @Deprecated public boolean dungeonsCrossInterior = false;
+
     public boolean quests = false;
 
-    /** Hue-shift or shuffle TIM CLUT colors (textures / models). */
     public boolean palettes = true;
-    /** When true, shuffle CLUT entries; when false, hue-rotate RGB555. */
     public boolean paletteShuffle = false;
-    /** Hue shift degrees 0-360 range for random pick when not shuffle. */
     public int paletteHueMin = 30;
     public int paletteHueMax = 330;
 
-
-    // Character start
     public boolean startingGear = true;
     public boolean startingGold = true;
     public boolean startingSpells = true;
 
-    // Expanded
     public boolean weaponStats = true;
     public boolean spellLevels = true;
     public boolean skillLevels = true;
     public boolean playerLevels = true;
     public boolean enemyLevels = false;
+    /**
+     * Extra combat fields on hero/enemy blobs: wider u16 band (AC / hit / speed-like).
+     */
+    public boolean combatExtras = true;
 
-    // QoL
     public boolean disableVideos = false;
-    /** Shuffle Music/*.RAW track contents (same filenames, mixed audio). */
     public boolean music = false;
-    /** Shuffle CINE/*.DPS FMV contents. */
     public boolean videos = false;
-    public boolean copyToCd = true;
+    public boolean copyToCd = false;
 
     public String seedText = "";
-    /** Optional CD root for Music/CINE loose-file shuffle. */
     public java.nio.file.Path cdRoot;
 
     public int statMin = 12;
@@ -60,6 +63,15 @@ public final class RandomizerOptions {
     public int skillMax = 5;
     public int weaponMin = 3;
     public int weaponMax = 25;
+    /** Armor / AC-like u16 band. */
+    public int acMin = 0;
+    public int acMax = 80;
+    /** Accuracy / to-hit-like u16 band. */
+    public int hitMin = 20;
+    public int hitMax = 120;
+    /** Speed / agility-like u16 band. */
+    public int speedMin = 5;
+    public int speedMax = 40;
 
     public int randomIn(java.util.Random rnd, int a, int b) {
         int lo = Math.min(a, b);
@@ -74,19 +86,31 @@ public final class RandomizerOptions {
     public int randomLevel(java.util.Random rnd) { return randomIn(rnd, levelMin, levelMax); }
     public int randomSkill(java.util.Random rnd) { return randomIn(rnd, skillMin, skillMax); }
     public int randomWeapon(java.util.Random rnd) { return randomIn(rnd, weaponMin, weaponMax); }
+    public int randomAc(java.util.Random rnd) { return randomIn(rnd, acMin, acMax); }
+    public int randomHit(java.util.Random rnd) { return randomIn(rnd, hitMin, hitMax); }
+    public int randomSpeed(java.util.Random rnd) { return randomIn(rnd, speedMin, speedMax); }
+
+    /** Enforce gear XOR loot — loot wins if both true (safer to drop gear). */
+    public void resolveConflicts() {
+        if (loot && startingGear) {
+            startingGear = false;
+            startingSpells = false;
+        }
+    }
 
     public static long seedFromString(String seedString) {
         if (seedString == null || seedString.isBlank()) {
             return System.currentTimeMillis();
         }
-        long hash = seedString.hashCode();
+        long h = 0xcbf29ce484222325L;
         for (int i = 0; i < seedString.length(); i++) {
-            hash = hash * 31 + seedString.charAt(i);
+            h ^= seedString.charAt(i);
+            h *= 0x100000001b3L;
         }
-        return hash;
+        return h;
     }
 
     public static String randomSeedString() {
-        return String.valueOf(100000 + new java.util.Random().nextInt(900000));
+        return Long.toHexString(System.nanoTime() ^ System.currentTimeMillis()).toUpperCase();
     }
 }

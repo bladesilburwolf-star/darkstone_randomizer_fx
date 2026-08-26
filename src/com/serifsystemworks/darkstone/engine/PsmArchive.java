@@ -550,7 +550,13 @@ public final class PsmArchive {
 
         int packed = 0;
         for (Path src : folders) {
-            String targetName = src.getFileName().toString().replace("_unpacked", "") + ".PSM.repacked";
+            String base = src.getFileName().toString();
+            if (base.toLowerCase(java.util.Locale.ROOT).endsWith("_unpacked")) {
+                base = base.substring(0, base.length() - "_unpacked".length());
+            }
+            // Clean .PSM name (no .repacked suffix)
+            String targetName = base.toUpperCase(java.util.Locale.ROOT).endsWith(".PSM")
+                    ? base : base + ".PSM";
             Path dest = src.getParent().resolve(targetName);
             if (repack(src, dest)) {
                 packed++;

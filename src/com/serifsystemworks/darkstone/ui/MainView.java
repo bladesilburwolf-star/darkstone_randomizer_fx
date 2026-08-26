@@ -1,10 +1,11 @@
 package com.serifsystemworks.darkstone.ui;
 
-import com.serifsystemworks.darkstone.engine.CdInstaller;
 import com.serifsystemworks.darkstone.engine.LogSink;
 import com.serifsystemworks.darkstone.engine.PsmArchive;
 import com.serifsystemworks.darkstone.engine.RandomizerEngine;
 import com.serifsystemworks.darkstone.engine.RandomizerOptions;
+import com.serifsystemworks.psxdisc.CueSheet;
+import com.serifsystemworks.psxdisc.Iso9660Patcher;
 import com.serifsystemworks.darkstone.engine.ScanResult;
 import com.serifsystemworks.darkstone.engine.TableScanner;
 import javafx.application.Platform;
@@ -26,6 +27,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
@@ -44,12 +46,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * SOTN-style Darkstone randomizer shell: presets, CUE import/export with seed,
+ * SOTN-style Darkstone randomizer: PSM patch + integrated multi-BIN disc build,
  * bronze metal frame + purple diamond banner.
  */
 public final class MainView {
 
-    public static final String VERSION = "3.1.0";
+    public static final String VERSION = "3.5.1";
 
     private final Stage stage;
     private final Preferences prefs = Preferences.userNodeForPackage(MainView.class);
@@ -57,12 +59,17 @@ public final class MainView {
     private Path cdRoot;
     private Path outputRoot;
     private Path cuePath;
+    private Path discOutRoot;
 
     private final Label cdPathLabel = new Label("Not set");
     private final Label outPathLabel = new Label("Not set");
-    private final Label cuePathLabel = new Label("No CUE loaded");
+    private final Label cuePathLabel = new Label("No CUE (optional — for BIN build)");
+    private final Label discOutLabel = new Label("Not set");
+    private final CheckBox chkBuildDisc = new CheckBox("Build new BIN/CUE after randomize");
+    private final TextField discSuffixField = new TextField("_RND");
+    private final CheckBox chkCleanup = new CheckBox("Delete unpacked folders after randomize");
     private final TextArea logArea = new TextArea();
-    private final Label statusLabel = new Label("Load CUE or CD folder · pick preset · Randomize");
+    private final Label statusLabel = new Label("CD + Out · optional CUE · Randomize builds disc");
     private final ProgressBar progressBar = new ProgressBar(0);
 
     private final TextField seedField = new TextField();
@@ -76,8 +83,14 @@ public final class MainView {
     private final TextField skillMax = rangeField("5");
     private final TextField weaponMin = rangeField("3");
     private final TextField weaponMax = rangeField("25");
+    private final TextField acMin = rangeField("0");
+    private final TextField acMax = rangeField("80");
+    private final TextField hitMin = rangeField("20");
+    private final TextField hitMax = rangeField("120");
+    private final TextField speedMin = rangeField("5");
+    private final TextField speedMax = rangeField("40");
 
-    private final CheckBox chkLoot = new CheckBox("Loot (QUEST$ items)");
+    private final CheckBox chkLoot = new CheckBox("Loot (QUEST$ — no start gear)");
     private final CheckBox chkHeroes = new CheckBox("Hero attributes");
     private final CheckBox chkGear = new CheckBox("Start gear");
     private final CheckBox chkGold = new CheckBox("Start gold");
@@ -92,8 +105,9 @@ public final class MainView {
     private final CheckBox chkMaps = new CheckBox("Map headers");
     private final CheckBox chkDungeons = new CheckBox("Land/dungeon tiles");
     private final CheckBox chkCrossLand = new CheckBox("Cross-land FE56");
-    private final CheckBox chkInteriors = new CheckBox("Dungeon interiors");
-    private final CheckBox chkCrossInterior = new CheckBox("Cross-interior (tier)");
+    private final CheckBox chkDoors = new CheckBox("Dungeon doors");
+    private final CheckBox chkEnemyTypes = new CheckBox("Enemy types (MO_)");
+    private final CheckBox chkCombatExtras = new CheckBox("AC / hit / speed");
     private final CheckBox chkFinalDungeon = new CheckBox("Final dungeon");
     private final CheckBox chkPalettes = new CheckBox("Palettes (TIM)");
     private final CheckBox chkPalShuffle = new CheckBox("Palette shuffle mode");
@@ -101,7 +115,6 @@ public final class MainView {
     private final CheckBox chkVideos = new CheckBox("Skip videos");
     private final CheckBox chkMusic = new CheckBox("Music (RAW)");
     private final CheckBox chkVideoShuffle = new CheckBox("Videos (DPS)");
-    private final CheckBox chkCopy = new CheckBox("Install to CD");
     private final CheckBox chkForce = new CheckBox("Force unpack");
 
     private final Button btnPresetGeneral = new Button("General");
@@ -154,10 +167,10 @@ public final class MainView {
 
     private void defaults() {
         // Quest item loot OFF by default — too easy to softlock
-        chkLoot.setSelected(false);
+        chkLoot.setSelected(true);
         chkHeroes.setSelected(true);
-        chkGear.setSelected(true);
-        chkGold.setSelected(true);
+        chkGear.setSelected(false);
+        chkGold.setSelected(false);
         chkSpells.setSelected(true);
         chkWeapons.setSelected(true);
         chkSpellLv.setSelected(true);
@@ -167,10 +180,11 @@ public final class MainView {
         chkEnemies.setSelected(false);
         chkShops.setSelected(false);
         chkMaps.setSelected(false);
-        chkDungeons.setSelected(true);
+        chkDungeons.setSelected(false);
         chkCrossLand.setSelected(false);
-        chkInteriors.setSelected(true);
-        chkCrossInterior.setSelected(false);
+        chkDoors.setSelected(false);
+        chkEnemyTypes.setSelected(true);
+        chkCombatExtras.setSelected(true);
         chkFinalDungeon.setSelected(false);
         chkPalettes.setSelected(false);
         chkPalShuffle.setSelected(false);
@@ -178,7 +192,24 @@ public final class MainView {
         chkVideos.setSelected(false);
         chkMusic.setSelected(false);
         chkVideoShuffle.setSelected(false);
-        chkCopy.setSelected(true);
+        chkBuildDisc.setSelected(true);
+        chkCleanup.setSelected(true);
+        discSuffixField.setPrefColumnCount(10);
+        // Gear XOR loot — quest weapons as starters crash the game
+        chkLoot.selectedProperty().addListener((o, was, on) -> {
+            if (on) {
+                chkGear.setSelected(false);
+                chkSpells.setSelected(false);
+                statusLabel.setText("Loot on → starting gear disabled");
+            }
+        });
+        chkGear.selectedProperty().addListener((o, was, on) -> {
+            if (on && chkLoot.isSelected()) {
+                chkLoot.setSelected(false);
+                statusLabel.setText("Starting gear on → loot disabled");
+            }
+        });
+
         seedField.setText(RandomizerOptions.randomSeedString());
         seedField.setPrefColumnCount(14);
         seedField.setPromptText("seed");
@@ -202,7 +233,7 @@ public final class MainView {
     private HBox buildHeader() {
         Label title = new Label("DARKSTONE RANDOMIZER");
         title.getStyleClass().add("title");
-        Label ver = new Label("v" + VERSION + "  ·  PSX  ·  CUE in / seed out  ·  CDImg rebuild");
+        Label ver = new Label("v" + VERSION + "  ·  PSX  ·  PSM patch  ·  loot + types  ·  UI text protected");
         ver.getStyleClass().add("subtitle");
         VBox text = new VBox(2, title, ver);
         HBox header = new HBox(text);
@@ -236,20 +267,21 @@ public final class MainView {
     private void applyPresetGeneral() {
         setAllOptions(false);
         chkHeroes.setSelected(true);
-        chkGear.setSelected(true);
-        chkGold.setSelected(true);
-        chkSpells.setSelected(true);
+        chkLoot.setSelected(true);
+        chkGear.setSelected(false);
+        chkGold.setSelected(false);
+        chkSpells.setSelected(false);
         chkWeapons.setSelected(true);
         chkSpellLv.setSelected(true);
         chkSkillLv.setSelected(true);
         chkPlayerLv.setSelected(true);
-        chkDungeons.setSelected(true);
-        chkInteriors.setSelected(true);
+        chkDungeons.setSelected(false);
+        chkDoors.setSelected(false);
+        chkEnemyTypes.setSelected(true);
+        chkCombatExtras.setSelected(false);
         chkCrossLand.setSelected(false);
-        chkCrossInterior.setSelected(false);
         chkFinalDungeon.setSelected(false);
-        chkCopy.setSelected(true);
-        chkLoot.setSelected(false);
+        chkMaps.setSelected(false);
         chkQuests.setSelected(false);
         statMin.setText("12"); statMax.setText("28");
         goldMin.setText("50"); goldMax.setText("300");
@@ -264,7 +296,7 @@ public final class MainView {
         setAllOptions(false);
         chkHeroes.setSelected(true);
         chkGear.setSelected(true);
-        chkGold.setSelected(true);
+        chkGold.setSelected(false);
         chkSpells.setSelected(true);
         chkWeapons.setSelected(true);
         chkSpellLv.setSelected(true);
@@ -272,15 +304,15 @@ public final class MainView {
         chkPlayerLv.setSelected(true);
         chkEnemyLv.setSelected(true);
         chkEnemies.setSelected(true);
-        chkShops.setSelected(true);
+        chkShops.setSelected(false);
         chkDungeons.setSelected(true);
-        chkInteriors.setSelected(true);
+        chkDoors.setSelected(true);
+        chkEnemyTypes.setSelected(true);
+        chkCombatExtras.setSelected(true);
         chkCrossLand.setSelected(false);
-        chkCrossInterior.setSelected(false);
         chkFinalDungeon.setSelected(false);
         chkPalettes.setSelected(true);
         chkMusic.setSelected(true);
-        chkCopy.setSelected(true);
         chkLoot.setSelected(false);
         chkQuests.setSelected(false);
         statMin.setText("10"); statMax.setText("35");
@@ -294,13 +326,18 @@ public final class MainView {
     /** Kitchen sink — cross-pack tiles, video shuffle, optional loot (still no keys). */
     private void applyPresetChaotic() {
         setAllOptions(true);
-        chkQuests.setSelected(false); // still protect quest-script option
-        chkLoot.setSelected(false);   // QUEST$ item names still off (softlock risk)
-        chkVideos.setSelected(false); // shuffle instead of skip
+        chkQuests.setSelected(false);
+        chkLoot.setSelected(true);
+        chkGear.setSelected(false);
+        chkSpells.setSelected(false);
+        chkVideos.setSelected(false);
         chkVideoShuffle.setSelected(true);
-        chkCrossLand.setSelected(true);
-        chkInteriors.setSelected(true);
-        chkCrossInterior.setSelected(true);
+        chkCrossLand.setSelected(false);
+        chkDungeons.setSelected(false);
+        chkDoors.setSelected(false);
+        chkMaps.setSelected(false);
+        chkEnemyTypes.setSelected(true);
+        chkCombatExtras.setSelected(false);
         chkFinalDungeon.setSelected(false);
         chkPalShuffle.setSelected(true);
         chkForce.setSelected(false);
@@ -316,7 +353,7 @@ public final class MainView {
         chkLoot.setSelected(on);
         chkHeroes.setSelected(on);
         chkGear.setSelected(on);
-        chkGold.setSelected(on);
+        chkGold.setSelected(false);
         chkSpells.setSelected(on);
         chkWeapons.setSelected(on);
         chkSpellLv.setSelected(on);
@@ -324,12 +361,13 @@ public final class MainView {
         chkPlayerLv.setSelected(on);
         chkEnemyLv.setSelected(on);
         chkEnemies.setSelected(on);
-        chkShops.setSelected(on);
-        chkMaps.setSelected(on);
-        chkDungeons.setSelected(on);
-        chkCrossLand.setSelected(on);
-        chkInteriors.setSelected(on);
-        chkCrossInterior.setSelected(on);
+        chkShops.setSelected(false);
+        chkMaps.setSelected(false);
+        chkDungeons.setSelected(false);
+        chkCrossLand.setSelected(false);
+        chkDoors.setSelected(false);
+        chkEnemyTypes.setSelected(on);
+        chkCombatExtras.setSelected(on);
         chkFinalDungeon.setSelected(false); // never auto-on even in "all"
         chkPalettes.setSelected(on);
         chkPalShuffle.setSelected(on);
@@ -337,7 +375,7 @@ public final class MainView {
         chkVideos.setSelected(on);
         chkMusic.setSelected(on);
         chkVideoShuffle.setSelected(on);
-        chkCopy.setSelected(on);
+        chkBuildDisc.setSelected(on);
     }
 
     private ScrollPane buildSidebar() {
@@ -347,18 +385,18 @@ public final class MainView {
         side.setMaxWidth(Double.MAX_VALUE);
 
         side.getChildren().add(card("Disc / folders",
-                pathRow("CUE", cuePathLabel, this::importCue),
                 pathRow("CD", cdPathLabel, this::selectCdFolder),
                 pathRow("Out", outPathLabel, this::selectOutput),
-                flow(chkForce, chkCopy)));
+                pathRow("CUE", cuePathLabel, this::selectCue),
+                pathRow("BIN out", discOutLabel, this::selectDiscOut),
+                flow(chkForce, chkBuildDisc, chkCleanup),
+                new HBox(8, new Label("Suffix"), discSuffixField)));
 
         side.getChildren().add(card("Seed",
                 new HBox(8, grow(seedField),
                         action("New", () -> seedField.setText(RandomizerOptions.randomSeedString())),
                         action("Copy", this::copySeed)),
                 new HBox(8,
-                        action("Import CUE", this::importCue),
-                        action("Export CUE", this::exportCueWithSeed),
                         action("Save seed", this::exportSeed))));
 
         GridPane ranges = new GridPane();
@@ -370,15 +408,16 @@ public final class MainView {
         r = rangeRow(ranges, r, "Levels", levelMin, levelMax);
         r = rangeRow(ranges, r, "Skills", skillMin, skillMax);
         r = rangeRow(ranges, r, "Weapon", weaponMin, weaponMax);
+        r = rangeRow(ranges, r, "AC", acMin, acMax);
+        r = rangeRow(ranges, r, "Hit", hitMin, hitMax);
+        r = rangeRow(ranges, r, "Speed", speedMin, speedMax);
         side.getChildren().add(card("Ranges", ranges));
 
         side.getChildren().add(card("Character / items",
-                flow(chkLoot, chkHeroes, chkGear, chkGold, chkSpells,
-                        chkWeapons, chkSpellLv, chkSkillLv, chkPlayerLv)));
+                flow(chkLoot, chkHeroes, chkWeapons, chkSpellLv, chkSkillLv, chkPlayerLv)));
 
         side.getChildren().add(card("World / lands",
-                flow(chkEnemies, chkEnemyLv, chkShops, chkMaps, chkDungeons, chkCrossLand, chkInteriors, chkCrossInterior, chkFinalDungeon,
-                        chkPalettes, chkPalShuffle, chkQuests)));
+                flow(chkEnemies, chkEnemyTypes, chkEnemyLv, chkPalettes, chkPalShuffle, chkFinalDungeon)));
 
         side.getChildren().add(card("Audio / video",
                 flow(chkMusic, chkVideoShuffle, chkVideos)));
@@ -387,11 +426,8 @@ public final class MainView {
         Button scan = action("Scan", () -> runInBackground("Scanning...", this::scanTables));
         Button run = action("Randomize", () -> runInBackground("Randomizing...", this::runMaster));
         run.getStyleClass().add("master");
-        Button install = action("Install only", this::confirmAndInstallToCd);
-        install.getStyleClass().add("danger");
-        HBox actions = new HBox(8, unpack, scan);
-        HBox actions2 = new HBox(8, run, install);
-        side.getChildren().add(card("Run", actions, actions2));
+        HBox actions = new HBox(8, unpack, scan, run);
+        side.getChildren().add(card("Run", actions));
 
         ScrollPane scroll = new ScrollPane(side);
         scroll.setFitToWidth(true);
@@ -439,203 +475,38 @@ public final class MainView {
         }
     }
 
-    /** Open a .cue; set CD root to its folder; pull seed from filename if present. */
-    private void importCue() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("Import Darkstone CUE sheet");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CUE sheets", "*.cue", "*.CUE"));
-        File initial = prefsPath("cuePath");
-        if (initial == null) initial = prefsPath("cdRoot");
-        if (initial != null) chooser.setInitialDirectory(initial.isDirectory() ? initial : initial.getParentFile());
-        File picked = chooser.showOpenDialog(stage);
-        if (picked == null) return;
-        try {
-            cuePath = picked.toPath();
-            cuePathLabel.setText(cuePath.getFileName().toString());
-            prefs.put("cuePath", cuePath.toString());
 
-            Path parent = cuePath.getParent();
-            if (parent != null) {
-                cdRoot = parent;
-                cdPathLabel.setText(cdRoot.toString());
-                prefs.put("cdRoot", cdRoot.toString());
-            }
-
-            String name = cuePath.getFileName().toString();
-            Matcher m = Pattern.compile("(?i)(?:seed[_-]?)([A-Za-z0-9_-]{3,})").matcher(name);
-            if (m.find()) {
-                seedField.setText(m.group(1));
-                logSink.log("Seed taken from CUE name: " + m.group(1));
-            }
-            // Also parse FILE line for sanity
-            String text = Files.readString(cuePath, StandardCharsets.ISO_8859_1);
-            Matcher fm = Pattern.compile("(?i)FILE\\s+\"([^\"]+)\"").matcher(text);
-            if (fm.find()) {
-                logSink.log("CUE image: " + fm.group(1));
-            }
-            logSink.log("Imported CUE: " + cuePath);
-            statusLabel.setText("CUE loaded · CD = " + (parent != null ? parent.getFileName() : "?"));
-        } catch (Exception e) {
-            alert(Alert.AlertType.ERROR, "CUE import failed: " + e.getMessage());
+    private void selectCue() {
+        FileChooser fc = new FileChooser();
+        fc.setTitle("Select disc CUE (multi-track OK)");
+        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("CUE", "*.cue", "*.CUE"));
+        File f = fc.showOpenDialog(stage);
+        if (f == null) return;
+        cuePath = f.toPath();
+        cuePathLabel.setText(cuePath.toString());
+        prefs.put("cuePath", cuePath.toString());
+        Path parent = cuePath.getParent();
+        if (parent != null && cdRoot == null) {
+            cdRoot = parent;
+            cdPathLabel.setText(cdRoot.toString());
+            prefs.put("cdRoot", cdRoot.toString());
         }
+        logSink.log("CUE: " + cuePath);
+        statusLabel.setText("CUE ready for disc build");
     }
 
-    /**
-     * Write a new .cue next to the original (or in Out) named with the seed,
-     * e.g. Darkstone_seedABC123.cue — same FILE target as the source sheet.
-     */
-    private void exportCueWithSeed() {
-        try {
-            String seed = seedField.getText() == null ? "" : seedField.getText().trim();
-            if (seed.isBlank()) {
-                alert(Alert.AlertType.WARNING, "Enter a seed first.");
-                return;
-            }
-            Path sourceCue = cuePath;
-            if (sourceCue == null || !Files.isRegularFile(sourceCue)) {
-                // try find any .cue under cdRoot
-                if (cdRoot != null && Files.isDirectory(cdRoot)) {
-                    try (var stream = Files.list(cdRoot)) {
-                        sourceCue = stream
-                                .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".cue"))
-                                .findFirst()
-                                .orElse(null);
-                    }
-                }
-            }
-            if (sourceCue == null || !Files.isRegularFile(sourceCue)) {
-                alert(Alert.AlertType.WARNING, "Import a CUE first (or place one in the CD folder).");
-                return;
-            }
-
-            String body = Files.readString(sourceCue, StandardCharsets.ISO_8859_1);
-            String safe = sanitizeSeed(seed);
-            String outName = "Darkstone_seed" + safe + ".cue";
-            Path destDir = outputRoot != null ? outputRoot
-                    : (sourceCue.getParent() != null ? sourceCue.getParent() : Path.of("."));
-            Path dest = destDir.resolve(outName);
-
-            // Annotate with seed comment at top (harmless for most tools)
-            String annotated = "; Darkstone Randomizer " + VERSION + "\r\n"
-                    + "; seed=" + seed + "\r\n"
-                    + "; hash=" + RandomizerOptions.seedFromString(seed) + "\r\n"
-                    + "; preset=" + activePreset + "\r\n"
-                    + body;
-            Files.writeString(dest, annotated, StandardCharsets.ISO_8859_1);
-
-            // Also drop seed txt beside it
-            Path seedTxt = destDir.resolve("darkstone_seed_" + safe + ".txt");
-            Files.writeString(seedTxt, "seed=" + seed + "\n"
-                    + "hash=" + RandomizerOptions.seedFromString(seed) + "\n"
-                    + "preset=" + activePreset + "\n"
-                    + "cue=" + dest.getFileName() + "\n"
-                    + "version=" + VERSION + "\n");
-
-            cuePath = dest;
-            cuePathLabel.setText(dest.getFileName().toString());
-            logSink.log("Exported CUE: " + dest);
-            logSink.log("Exported seed: " + seedTxt);
-            statusLabel.setText("Exported " + outName);
-        } catch (Exception e) {
-            alert(Alert.AlertType.ERROR, "CUE export failed: " + e.getMessage());
+    private void selectDiscOut() {
+        DirectoryChooser chooser = new DirectoryChooser();
+        chooser.setTitle("Output folder for new BIN/CUE set");
+        File initial = prefsPath("discOutRoot");
+        if (initial != null) chooser.setInitialDirectory(initial);
+        File picked = chooser.showDialog(stage);
+        if (picked != null) {
+            discOutRoot = picked.toPath();
+            discOutLabel.setText(discOutRoot.toString());
+            prefs.put("discOutRoot", discOutRoot.toString());
+            logSink.log("Disc out: " + discOutRoot);
         }
-    }
-
-    private static String sanitizeSeed(String seed) {
-        String s = seed.replaceAll("[^A-Za-z0-9_-]", "");
-        if (s.length() > 32) s = s.substring(0, 32);
-        return s.isEmpty() ? "seed" : s;
-    }
-
-    private HBox buildStatus() {
-        HBox bar = new HBox(12, statusLabel, spacer(), progressBar);
-        bar.setAlignment(Pos.CENTER_LEFT);
-        bar.getStyleClass().add("status-bar");
-        HBox.setHgrow(statusLabel, Priority.ALWAYS);
-        return bar;
-    }
-
-    private static VBox card(String title, javafx.scene.Node... body) {
-        Label t = new Label(title.toUpperCase());
-        t.getStyleClass().add("section-label");
-        VBox box = new VBox(8);
-        box.getStyleClass().add("card");
-        box.getChildren().add(t);
-        box.getChildren().addAll(body);
-        return box;
-    }
-
-    private HBox pathRow(String caption, Label pathLabel, Runnable pick) {
-        Label c = new Label(caption);
-        c.getStyleClass().add("muted");
-        c.setPrefWidth(36);
-        Button b = action("…", pick);
-        b.getStyleClass().add("icon-btn");
-        HBox row = new HBox(8, c, grow(pathLabel), b);
-        row.setAlignment(Pos.CENTER_LEFT);
-        return row;
-    }
-
-    private static int rangeRow(GridPane g, int row, String name, TextField min, TextField max) {
-        Label l = new Label(name);
-        l.getStyleClass().add("muted");
-        g.add(l, 0, row);
-        g.add(min, 1, row);
-        g.add(new Label("–"), 2, row);
-        g.add(max, 3, row);
-        return row + 1;
-    }
-
-    private static HBox flow(javafx.scene.Node... nodes) {
-        VBox col = new VBox(6);
-        HBox row = new HBox(10);
-        row.setAlignment(Pos.CENTER_LEFT);
-        int i = 0;
-        for (javafx.scene.Node n : nodes) {
-            row.getChildren().add(n);
-            i++;
-            if (i % 2 == 0) {
-                col.getChildren().add(row);
-                row = new HBox(10);
-                row.setAlignment(Pos.CENTER_LEFT);
-            }
-        }
-        if (!row.getChildren().isEmpty()) {
-            col.getChildren().add(row);
-        }
-        return new HBox(col);
-    }
-
-    private static TextField rangeField(String v) {
-        TextField f = new TextField(v);
-        f.setPrefColumnCount(3);
-        f.getStyleClass().add("range-field");
-        return f;
-    }
-
-    private static Label grow(Label label) {
-        HBox.setHgrow(label, Priority.ALWAYS);
-        label.setMaxWidth(Double.MAX_VALUE);
-        return label;
-    }
-
-    private static TextField grow(TextField field) {
-        HBox.setHgrow(field, Priority.ALWAYS);
-        field.setMaxWidth(Double.MAX_VALUE);
-        return field;
-    }
-
-    private static Region spacer() {
-        Region r = new Region();
-        HBox.setHgrow(r, Priority.ALWAYS);
-        return r;
-    }
-
-    private Button action(String text, Runnable handler) {
-        Button b = new Button(text);
-        b.setOnAction(e -> handler.run());
-        actionButtons.add(b);
-        return b;
     }
 
     private void selectCdFolder() {
@@ -684,45 +555,139 @@ public final class MainView {
         RandomizerOptions options = currentOptions();
         engine().runMaster(options);
         if (options.disableVideos) {
-            engine().disableVideos(requireCd());
+            try {
+                engine().disableVideos(requireCd());
+            } catch (Exception ex) {
+                logSink.log("[!] Video disable skipped: " + ex.getMessage());
+            }
         }
-        if (options.copyToCd) {
-            CdInstaller.install(outputRoot, requireCd(), logSink);
+
+        // Collect repacked *.PSM next to unpacked folders (clean names, no .repacked)
+        Path out = requireOutput();
+        java.util.Map<String, byte[]> psmMap = new java.util.LinkedHashMap<>();
+        try (var walk = Files.walk(out, 3)) {
+            for (Path f : walk.filter(Files::isRegularFile).toList()) {
+                String n = f.getFileName().toString().toUpperCase(java.util.Locale.ROOT);
+                if (n.endsWith(".PSM") && !n.endsWith(".PSM.BAK")) {
+                    psmMap.put(f.getFileName().toString(), Files.readAllBytes(f));
+                }
+            }
         }
+        logSink.log("Repacked PSM ready: " + psmMap.size());
+
+        if (chkBuildDisc.isSelected()) {
+            buildDiscImage(psmMap);
+        } else {
+            logSink.log("Disc build skipped (checkbox off). Copy PSM into your extract or enable Build BIN/CUE.");
+        }
+
+        if (chkCleanup.isSelected()) {
+            deleteUnpackedFolders(out);
+        }
+
         try {
             String seed = options.seedText == null ? "" : options.seedText.trim();
-            Path seedFile = requireOutput().resolve("darkstone_seed_" + sanitizeSeed(seed) + ".txt");
+            Path seedFile = out.resolve("darkstone_seed_" + sanitizeSeed(seed) + ".txt");
             Files.writeString(seedFile, "seed=" + seed + "\n"
                     + "hash=" + RandomizerOptions.seedFromString(seed) + "\n"
                     + "preset=" + activePreset + "\n"
                     + "version=" + VERSION + "\n");
             logSink.log("Seed exported: " + seedFile);
-            // Auto-export CUE with seed when one is known
-            if (cuePath != null && Files.isRegularFile(cuePath)) {
-                Platform.runLater(this::exportCueWithSeed);
-            }
         } catch (Exception e) {
             logSink.log("[!] Seed export skipped: " + e.getMessage());
         }
-        logSink.log("Next: rebuild ISO with CDImg (or burn the seeded CUE), then boot.");
+        logSink.log("Done. Boot the new CUE if disc build was enabled.");
     }
 
-    private void confirmAndInstallToCd() {
-        try {
-            requireCd();
-            requireOutput();
-        } catch (Exception e) {
-            alert(Alert.AlertType.WARNING, e.getMessage());
+    private void buildDiscImage(java.util.Map<String, byte[]> replacements) throws Exception {
+        if (cuePath == null || !Files.isRegularFile(cuePath)) {
+            // try auto-find under CD
+            if (cdRoot != null && Files.isDirectory(cdRoot)) {
+                try (var stream = Files.list(cdRoot)) {
+                    cuePath = stream.filter(p -> p.getFileName().toString().toLowerCase().endsWith(".cue"))
+                            .findFirst().orElse(null);
+                }
+            }
+        }
+        if (cuePath == null || !Files.isRegularFile(cuePath)) {
+            logSink.log("[!] No CUE set — cannot build BIN/CUE. Select CUE under Disc / folders.");
             return;
         }
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle("Install to CD");
-        confirm.setHeaderText("Overwrite PSM files on the CD extract?");
-        confirm.setContentText("Backups are written as *.PSM.bak on first install.\nRebuild ISO with CDImg afterward.");
-        Optional<ButtonType> result = confirm.showAndWait();
-        if (result.isPresent() && result.get() == ButtonType.OK) {
-            runInBackground("Installing to CD...", () -> CdInstaller.install(outputRoot, cdRoot, logSink));
+        Path outDir = discOutRoot != null ? discOutRoot : requireOutput().resolve("disc_out");
+        Files.createDirectories(outDir);
+        String suffix = discSuffixField.getText() == null || discSuffixField.getText().isBlank()
+                ? "_RND" : discSuffixField.getText().trim();
+        // Prefer seed in suffix when available
+        String seed = seedField.getText() == null ? "" : seedField.getText().trim();
+        if (!seed.isBlank() && !suffix.contains(sanitizeSeed(seed))) {
+            suffix = suffix + "_" + sanitizeSeed(seed);
         }
+
+        CueSheet cue = CueSheet.parse(cuePath);
+        Path dataBin = cue.primaryDataBin();
+        if (dataBin == null || !Files.isRegularFile(dataBin)) {
+            logSink.log("[!] Data BIN not found for CUE.");
+            return;
+        }
+        int sector = cue.sectorSizeForPrimary();
+
+        for (CueSheet.FileEntry f : cue.files) {
+            Path src = cue.baseDir.resolve(f.name);
+            if (!Files.isRegularFile(src)) {
+                logSink.log("[!] Missing track: " + src.getFileName());
+                continue;
+            }
+            String outName = f.name;
+            if (outName.toLowerCase().endsWith(".bin")) {
+                int dot = outName.lastIndexOf('.');
+                outName = outName.substring(0, dot) + suffix + outName.substring(dot);
+            }
+            Path dst = outDir.resolve(outName);
+            logSink.log("Copy track " + src.getFileName() + " -> " + dst.getFileName());
+            Files.copy(src, dst, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        String dataName = dataBin.getFileName().toString();
+        String outDataName = dataName;
+        if (outDataName.toLowerCase().endsWith(".bin")) {
+            int dot = outDataName.lastIndexOf('.');
+            outDataName = outDataName.substring(0, dot) + suffix + outDataName.substring(dot);
+        }
+        Path outDataBin = outDir.resolve(outDataName);
+
+        Iso9660Patcher iso = new Iso9660Patcher(outDataBin, sector);
+        int n = iso.replaceAll(replacements);
+        logSink.log("Disc patch: " + n + " file(s) into " + outDataName);
+
+        String cueText = cue.toCueText(suffix);
+        String base = cuePath.getFileName().toString();
+        int d = base.lastIndexOf('.');
+        if (d > 0) base = base.substring(0, d);
+        Path outCue = outDir.resolve(base + suffix + ".cue");
+        Files.writeString(outCue, cueText);
+        logSink.log("Wrote " + outCue);
+        statusLabel.setText("Disc ready: " + outCue.getFileName());
+    }
+
+    private void deleteUnpackedFolders(Path root) throws Exception {
+        int removed = 0;
+        try (var walk = Files.walk(root, 6)) {
+            java.util.List<Path> dirs = walk.filter(Files::isDirectory)
+                    .filter(p -> p.getFileName().toString().toLowerCase().endsWith("_unpacked"))
+                    .sorted((a, b) -> Integer.compare(b.getNameCount(), a.getNameCount()))
+                    .toList();
+            for (Path dir : dirs) {
+                try (var files = Files.walk(dir)) {
+                    java.util.List<Path> all = files.sorted((a, b) -> Integer.compare(b.getNameCount(), a.getNameCount())).toList();
+                    for (Path f : all) {
+                        Files.deleteIfExists(f);
+                    }
+                }
+                removed++;
+                logSink.log("Removed " + root.relativize(dir));
+            }
+        }
+        logSink.log("Cleanup: deleted " + removed + " unpacked folder(s).");
     }
 
     private RandomizerOptions currentOptions() {
@@ -730,7 +695,7 @@ public final class MainView {
         o.loot = chkLoot.isSelected();
         o.heroes = chkHeroes.isSelected();
         o.startingGear = chkGear.isSelected();
-        o.startingGold = chkGold.isSelected();
+        o.startingGold = false; // no reliable field
         o.startingSpells = chkSpells.isSelected();
         o.weaponStats = chkWeapons.isSelected();
         o.spellLevels = chkSpellLv.isSelected();
@@ -738,13 +703,19 @@ public final class MainView {
         o.playerLevels = chkPlayerLv.isSelected();
         o.enemyLevels = chkEnemyLv.isSelected();
         o.enemies = chkEnemies.isSelected();
-        o.shops = chkShops.isSelected();
-        o.maps = chkMaps.isSelected();
-        o.dungeons = chkDungeons.isSelected();
-        o.dungeonsCrossLand = chkCrossLand.isSelected();
-        o.dungeonsInteriors = chkInteriors.isSelected();
-        o.dungeonsCrossInterior = chkCrossInterior.isSelected();
+        o.shops = false; // unsafe until price fields mapped
+        // Land/indoor tiles + door prop shuffle disabled until entrance tables are mapped
+        o.maps = false;
+        o.dungeons = false;
+        o.dungeonsCrossLand = false;
+        o.dungeonDoors = false;
+        o.dungeonsInteriors = false;
+        o.dungeonsCrossInterior = false;
         o.dungeonsFinal = chkFinalDungeon.isSelected();
+        o.enemyTypes = chkEnemyTypes.isSelected();
+        o.combatExtras = false; // was spraying into string tables; re-enable after field map
+        o.startingGear = false;
+        o.startingSpells = false;
         o.palettes = chkPalettes.isSelected();
         o.paletteShuffle = chkPalShuffle.isSelected();
         o.quests = chkQuests.isSelected();
@@ -752,7 +723,7 @@ public final class MainView {
         o.music = chkMusic.isSelected();
         o.videos = chkVideoShuffle.isSelected();
         o.cdRoot = cdRoot;
-        o.copyToCd = chkCopy.isSelected();
+        o.copyToCd = false;
         o.seedText = seedField.getText();
         o.statMin = parse(statMin, 12);
         o.statMax = parse(statMax, 35);
@@ -764,6 +735,12 @@ public final class MainView {
         o.skillMax = parse(skillMax, 5);
         o.weaponMin = parse(weaponMin, 3);
         o.weaponMax = parse(weaponMax, 25);
+        o.acMin = parse(acMin, 0);
+        o.acMax = parse(acMax, 80);
+        o.hitMin = parse(hitMin, 20);
+        o.hitMax = parse(hitMax, 120);
+        o.speedMin = parse(speedMin, 5);
+        o.speedMax = parse(speedMax, 40);
         return o;
     }
 
@@ -840,6 +817,11 @@ public final class MainView {
             cuePath = Path.of(cue);
             cuePathLabel.setText(cuePath.getFileName().toString());
         }
+        String dout = prefs.get("discOutRoot", "");
+        if (!dout.isBlank() && Files.isDirectory(Path.of(dout))) {
+            discOutRoot = Path.of(dout);
+            discOutLabel.setText(dout);
+        }
     }
 
     private File prefsPath(String key) {
@@ -857,8 +839,8 @@ public final class MainView {
 
     private void logStartup() {
         logSink.log("Darkstone PSX Randomizer " + VERSION);
-        logSink.log("SOTN-style flow: Import CUE → Preset → Randomize → Export CUE (seed in name).");
-        logSink.log("Loot (QUEST$ items) is OFF by default to avoid softlocks.");
+        logSink.log("Flow: Unpack → Randomize (repack + optional BIN/CUE build + cleanup).");
+        logSink.log("Loot (QUEST$ — no start gear) is OFF by default to avoid softlocks.");
         logSink.log("Presets: General (safe) · Advanced · Chaotic.");
     }
 
@@ -866,6 +848,86 @@ public final class MainView {
         Alert alert = new Alert(type, message == null ? "" : message, ButtonType.OK);
         alert.initOwner(stage);
         alert.showAndWait();
+    }
+
+
+    private HBox buildStatus() {
+        HBox box = new HBox(10, statusLabel, progressBar);
+        HBox.setHgrow(statusLabel, Priority.ALWAYS);
+        progressBar.setPrefWidth(160);
+        progressBar.setMaxWidth(200);
+        box.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+        box.getStyleClass().add("status-bar");
+        return box;
+    }
+
+    private static TextField rangeField(String value) {
+        TextField f = new TextField(value);
+        f.setPrefColumnCount(4);
+        f.getStyleClass().add("range-field");
+        return f;
+    }
+
+    private static Region spacer() {
+        Region r = new Region();
+        HBox.setHgrow(r, Priority.ALWAYS);
+        return r;
+    }
+
+    private static HBox pathRow(String caption, Label pathLabel, Runnable onBrowse) {
+        Label cap = new Label(caption);
+        cap.setPrefWidth(56);
+        Button browse = new Button("…");
+        browse.setOnAction(e -> onBrowse.run());
+        HBox.setHgrow(pathLabel, Priority.ALWAYS);
+        pathLabel.setMaxWidth(Double.MAX_VALUE);
+        HBox row = new HBox(8, cap, pathLabel, browse);
+        row.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+        return row;
+    }
+
+    private static FlowPane flow(javafx.scene.Node... nodes) {
+        FlowPane fp = new FlowPane(10, 8);
+        fp.getChildren().addAll(nodes);
+        return fp;
+    }
+
+    private static javafx.scene.Node grow(TextField field) {
+        HBox.setHgrow(field, Priority.ALWAYS);
+        field.setMaxWidth(Double.MAX_VALUE);
+        return field;
+    }
+
+    private Button action(String text, Runnable r) {
+        Button b = new Button(text);
+        b.setOnAction(e -> r.run());
+        actionButtons.add(b);
+        return b;
+    }
+
+    private static VBox card(String title, javafx.scene.Node... body) {
+        Label t = new Label(title);
+        t.getStyleClass().add("card-title");
+        VBox box = new VBox(8);
+        box.getStyleClass().add("card");
+        box.getChildren().add(t);
+        box.getChildren().addAll(body);
+        return box;
+    }
+
+    private static int rangeRow(GridPane grid, int row, String label, TextField min, TextField max) {
+        grid.add(new Label(label), 0, row);
+        grid.add(min, 1, row);
+        grid.add(new Label("–"), 2, row);
+        grid.add(max, 3, row);
+        return row + 1;
+    }
+
+    private static String sanitizeSeed(String seed) {
+        if (seed == null || seed.isBlank()) return "noseed";
+        String s = seed.trim().replaceAll("[^A-Za-z0-9_-]", "_");
+        if (s.length() > 40) s = s.substring(0, 40);
+        return s;
     }
 
     @FunctionalInterface

@@ -1,75 +1,109 @@
 # Darkstone PSX Randomizer
 
-**v3.0** — SOTN-style presets (General / Advanced / Chaotic), CUE import/export with seed in the filename, bronze + purple diamond UI. **Loot (QUEST$ items) is OFF by default** to avoid softlocks.
-
-JavaFX tool for **Darkstone** (PlayStation, 1999). Unpack `.PSM` archives, randomize gameplay data, install patched files, then rebuild a bootable image with **CDImg**.
-
-In-place same-size patches keep the PSM TOC intact (no black-screen repacks).
+**v3.4** — JavaFX tool for *Darkstone* (PlayStation USA). Same-size PSM patches, multi-BIN disc build, SOTN-style presets.
 
 ## Requirements
 
 - JDK 21+ and JavaFX SDK 26 (`C:\Program Files\Java\javafx-sdk-26.0.2`)
-- **CDImg** (or similar) to rebuild the ISO after install
+- USA disc extract + `.cue` (multi-track BINs)
 
 Edit `JFX_HOME` in `build.bat` / `run.bat` if needed.
 
 ## Workflow
 
-1. Extract the CD to a folder (`SYSTEM.CNF`, `DATA1.PSM`, …).
-2. `build.bat` → `run.bat`
-3. Set **CD** and **Out**, **Unpack**, then **Randomize** (Copy to CD on).
-4. Rebuild the ISO with **CDImg** and boot that image — folder boot is not supported.
+1. `build.bat` → `run.bat`
+2. Set **CD** (extract), **Out** (work folder), **CUE** (for disc build), optional **BIN out**
+3. **Unpack** → **Randomize**
+4. Randomize will: patch → repack clean `*.PSM` → optional **new BIN/CUE** → optional **delete `*_unpacked`**
+5. Boot the new CUE in DuckStation / Beetle
 
-## UI (v2.5)
+No separate “Install to CD” and no seed-named CUE export. Disc build is integrated.
 
-Left sidebar:
+## Presets
 
-- Folders, seed, **ranges** (stats / gold / levels / skills / weapon)
-- **Character** modules, **World** modules, **Output** options
-- Actions: Unpack · Scan · **Randomize** · Install only
+| Preset | Intent |
+|--------|--------|
+| **General** | Heroes, gear, light dungeons, palettes. Loot **off**. |
+| **Advanced** | + enemies, shops, music. Loot still **off**. |
+| **Chaotic** | Cross-land / cross-interior flags, wider ranges. Loot still **off**. |
 
-One log panel on the right.
+## World structure (PSX)
 
-## Modules
+- **8 lands**, **1 dungeon per land**, **4 levels per dungeon** (final dungeon **3** levels)
+- **3 variant banks** of land/quest data (`_0` / `_1` / `_2` style tiers)
+- Atomic dungeon unit for future rando = **4-level block**, not single floors
 
-| Module | Notes |
-| --- | --- |
-| Loot | 64-byte item pools |
-| Hero stats | Attribute u16s in **stat range** |
-| Starting gear / gold / spell books | Class starter table (DATA1) |
-| Weapon stats | Min/max damage-like pairs in **weapon range** |
-| Spell levels | Ranks near spell name tables in **skill range** |
-| Skill levels | Isolated ranks in class blobs in **skill range** |
-| Player levels | Starter level fields in **level range** |
-| Enemy levels | Combat fields in templates in **level range** |
-| Swap enemies | Same-size template shuffle |
-| Shops / maps / quests | Optional; maps/quests can break progression |
-| **Land/dungeon tiles** | FE objects + room templates in LAND* and QUEST0/1/2 LEVEL* |
-| **Palettes (TIM)** | Hue-shift or shuffle RGB555 CLUTs on textures (DATA2/TOWN/LAND) |
-| **Dungeons** | Shuffle FE map objects in LAND* (per-land or cross-land 56-byte) |
-| Disable videos | Renames `.STR`/`.XA`/`*INTRO*`/`*MOVIE*` → `*.vidbak` |
+See also `HEX_LIST.md`, `CROSSWALK_PC_PSX.md`.
 
-Heuristic fields are best-effort from USA DATA1 layouts; keep ranges modest and test after each change set.
+## Known limitations (read before enabling loot)
 
-## Layout
+### Starting gear **XOR** quest/loot item shuffle
 
-```
-src/com/serifsystemworks/darkstone/
-  DarkstoneApp.java
-  engine/          PSM I/O, randomize, install
-  ui/              Modern sidebar UI + theme.css
-PSM/               Reference archives
-build.bat / run.bat
-```
+Quest weapons / unique dungeon gear must **not** be written into **starting gear** slots.
 
-## Format documentation
+If loot (QUEST$ `ITEM_*`) and starting gear both run, the starter table can receive a **quest-bound weapon**. The game then **crashes** on new game / first equip.
 
-See **[HEX_LIST.md](HEX_LIST.md)** for PSM TOC layout, FE map objects, TIM/CLUT, QUEST$ loot, and boot-safety notes.
+**Rule: enable only one**
 
+| Option | Safe with |
+|--------|-----------|
+| Starting gear / gold / books | Hero stats, weapons stats, dungeons (layout), palettes, enemies |
+| Loot / QUEST$ item names | Hero stats, etc. — **not** starting gear |
 
-## PC Randomizer (shelved)
+Presets keep **loot off** on purpose. If you turn loot on, turn **starting gear** (and related starter tables) **off**.
 
-PC campaign `DATA.MTF` cannot be safely size-edited with current MTF tools (repacks grow and fail to boot). The PC dump is retained as a **name/structure reference** only.
+### Dungeon doors (v3.4)
 
-See **[CROSSWALK_PC_PSX.md](CROSSWALK_PC_PSX.md)** for crystals, keys, and quest IDs applied to the **PSX** randomizer.
-PC sources remain under `pc/` for archival use.
+**Dungeon doors** replaces the old interiors toggle: cross-land shuffle of fixed-count
+structural FE props on LAND packs. Full entrance-table rando still future work.
+
+### Dungeon interiors (old)
+
+Interior FE shuffle did **not** produce reliable interior layout changes.
+
+What works better today:
+
+- **Overworld / LAND** FE-style tile mix (when it behaves like land-tile shuffle)
+- Enemy / hero **stats** independent of layout
+
+What we still need (later):
+
+1. Find **hex / table for dungeon entrances** on the overworld
+2. Shuffle entrances the old-fashioned way (entrance A → dungeon B)
+3. And/or shuffle **overworld** only
+4. Optional **coupled** vs **decoupled** entrances (SotN-style):  
+   - coupled = two-way links stay consistent  
+   - decoupled = exit may not return to the door you used
+
+Until entrance tables are mapped, treat **interiors** as experimental / ineffective.
+
+### Other safety
+
+- Never shuffle **crystals, keys, Draak gate, VIRTUAL** tokens as free loot
+- Same-size PSM patches only (TOC id/hash preserved)
+- Disc build: replacement file size ≤ ISO extent
+
+## Modules (summary)
+
+| Module | Status |
+|--------|--------|
+| Hero stats / ranges | Works |
+| Starting gear / gold / spells | Works — **conflicts with loot** |
+| Loot (QUEST$) | Works only if gear is off; crash if both |
+| Enemies / levels | Works |
+| Palettes / land colors | Works |
+| LAND / outdoor tiles | Partial / useful |
+| Dungeon doors | Structural FE cross-land (v3.4) |
+| Enemy types (MO_) | Per-land encounter names |
+| AC / hit / speed | Sparse combat field bands |
+| Dungeon interiors | Removed — was ineffective |
+| Multi-BIN disc build | Integrated |
+| Auto-delete unpacked | Optional (default on) |
+
+## Build log
+
+Failed compiles write `build_error.log` next to `build.bat`.
+
+## PC / MTF
+
+Campaign `DATA.MTF` needs real compress+pack. Shelved; see `CROSSWALK_PC_PSX.md` and `MtfTool/`.

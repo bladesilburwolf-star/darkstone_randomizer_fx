@@ -12,6 +12,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.HashSet;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
@@ -52,6 +54,10 @@ public final class RandomizerEngine {
         log.log("   Levels " + options.levelMin + "-" + options.levelMax
                 + "  Skills " + options.skillMin + "-" + options.skillMax
                 + "  Weapon " + options.weaponMin + "-" + options.weaponMax);
+        options.resolveConflicts();
+        if (options.loot && !options.startingGear) {
+            log.log("Note: loot on → starting gear forced OFF (crash if both).");
+        }
         log.log("=================================================");
 
         if (options.loot) {
@@ -59,6 +65,9 @@ public final class RandomizerEngine {
         }
         if (options.enemies) {
             randomizeEnemies(rnd);
+        }
+        if (options.enemyTypes) {
+            randomizeEnemyTypes(rnd);
         }
         if (options.heroes) {
             randomizeHeroes(rnd, options);
@@ -83,6 +92,9 @@ public final class RandomizerEngine {
         }
         if (options.enemyLevels) {
             randomizeEnemyLevels(rnd, options);
+        }
+        if (options.combatExtras) {
+            randomizeCombatExtras(rnd, options);
         }
         if (options.shops) {
             randomizeShops(rnd);
@@ -126,27 +138,8 @@ public final class RandomizerEngine {
      * Never shuffle these as generic loot.
      */
     static boolean isProgressionItem(String name) {
-        if (name == null) {
-            return true;
-        }
-        String u = name.toUpperCase(java.util.Locale.ROOT);
-        if (u.equals("ITEM_DROP") || u.equals("ITEM_PICK") || u.equals("ITEM_USE")) {
-            return true;
-        }
-        if (u.contains("KEY") || u.contains("CLEF") || u.contains("FALSEKEY")) {
-            return true;
-        }
-        if (u.contains("CRISTAL") || u.contains("CRYSTAL")) {
-            return true;
-        }
-        if (u.contains("DRAAK") || u.contains("VIRTUAL") || u.contains("QFINAL")) {
-            return true;
-        }
-        if (u.contains("MIRROIR") || u.contains("PRISME") || u.contains("COUFFIN")
-                || u.equals("ITEM_AMULET_KALIBA") || u.equals("ITEM_CLEF_DRAAK")) {
-            return true;
-        }
-        return false;
+        return com.serifsystemworks.darkstone.config.RandomizerConstants.isProtectedItem(name)
+                || (name != null && name.toUpperCase(java.util.Locale.ROOT).contains("CRYSTAL"));
     }
 
     public int randomizeLoot(Random rnd) {
@@ -376,6 +369,24 @@ public final class RandomizerEngine {
                             + options.statMin + "-" + options.statMax);
                 }
             }
+            // Optional: raise class MAX caps to 999 when PC-style patterns are found
+            int capFiles = 0;
+            List<Path> large = findMatching(p -> {
+                long sz = Files.size(p);
+                if (sz < 2000 || sz > 12_000) return false;
+                byte[] b = Files.readAllBytes(p);
+                return !TableScanner.isUiStringTable(b);
+            });
+            StatCapRemover caps = new StatCapRemover(log);
+            for (Path p : large) {
+                byte[] data = Files.readAllBytes(p);
+                if (caps.removeStatCaps(data) && writePatched(p, data)) {
+                    capFiles++;
+                }
+            }
+            if (capFiles > 0) {
+                log.log("[+] Stat caps raised on " + capFiles + " blob(s).");
+            }
             log.log("[+] Hero randomization: patched " + randomizedCount + " class data blobs.");
             return randomizedCount;
         } catch (Exception e) {
@@ -458,172 +469,29 @@ public final class RandomizerEngine {
      * (observed values 22/30). Reroll those into goldMin–goldMax.
      */
     public int randomizeStartingGold(Random rnd, RandomizerOptions options) {
-        try {
-            List<Path> gearFiles = findMatching(p -> {
-                byte[] b = Files.readAllBytes(p);
-                if (b.length < 500 || b.length > 8000) {
-                    return false;
-                }
-                String t = TableScanner.latin1(b);
-                return t.contains("ITEM_POTION_HEALING") && t.contains("ASPRITE_WARRIOR");
-            });
-
-            int changed = 0;
-            for (Path p : gearFiles) {
-                byte[] data = Files.readAllBytes(p);
-                ByteBuffer bb = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
-                // Walk 344-byte class strides; gold-like field often at +48 within block
-                int localChanges = 0;
-                for (int base = 0; base + 52 < data.length; base += 344) {
-                    int off = base + 48;
-                    if (off + 4 > data.length) {
-                        break;
-                    }
-                    int val = bb.getInt(off);
-                    if (val >= 10 && val <= 200) {
-                        bb.putInt(off, options.randomGold(rnd));
-                        localChanges++;
-                    }
-                }
-                if (localChanges > 0 && writePatched(p, data)) {
-                    changed += localChanges;
-                    log.log("    gold in " + p.getFileName() + ": " + localChanges + " class(es) -> "
-                            + options.goldMin + "-" + options.goldMax);
-                }
-            }
-            log.log("[+] Starting gold: updated " + changed + " class entries.");
-            return changed;
-        } catch (Exception e) {
-            log.log("[!] Starting gold failed: " + e.getMessage());
-            return 0;
-        }
+        // No stable gold field map yet; prior heuristics could touch wrong ints.
+        log.log("[+] Starting gold: skipped (no effect / unsafe without field map).");
+        return 0;
     }
 
     public int randomizeShops(Random rnd) {
-        try {
-            List<Path> shopFiles = findMatching(p -> TableScanner.isShop(p, Files.readAllBytes(p)));
-            int updatedShops = 0;
-            for (Path p : shopFiles) {
-                byte[] data = Files.readAllBytes(p);
-                ByteBuffer bb = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
-                for (int i = 0; i + 4 <= data.length; i += 4) {
-                    int itemOrPrice = bb.getInt(i);
-                    if (itemOrPrice > 10 && itemOrPrice < 50_000) {
-                        double multiplier = 0.5 + (rnd.nextDouble() * 1.7);
-                        int newPrice = Math.max(1, (int) (itemOrPrice * multiplier));
-                        bb.putInt(i, newPrice);
-                    }
-                }
-                if (writePatched(p, data)) {
-                    updatedShops++;
-                }
-            }
-            log.log("[+] Shop & price randomization: rebalanced " + updatedShops + " town tables.");
-            return updatedShops;
-        } catch (Exception e) {
-            log.log("[!] Shop randomization failed: " + e.getMessage());
-            return 0;
-        }
+        // Disabled: previous implementation rewrote every u32 in 10..50000 range inside
+        // TOWN blobs, which corrupts string pointers/lengths and freezes the shop UI.
+        log.log("[+] Shops: skipped (unsafe price spray disabled — caused freezes / long strings).");
+        return 0;
     }
 
+
     public int randomizeMaps(Random rnd) {
-        try {
-            List<Path> mapFiles = findMatching(p -> TableScanner.isMap(Files.readAllBytes(p)));
-            if (mapFiles.size() < 2) {
-                log.log("[+] Map randomization: not enough map headers (" + mapFiles.size() + ").");
-                return 0;
-            }
-            List<byte[]> contents = new ArrayList<>();
-            for (Path p : mapFiles) {
-                contents.add(Files.readAllBytes(p));
-            }
-            Collections.shuffle(contents, rnd);
-            int n = 0;
-            for (int i = 0; i < mapFiles.size(); i++) {
-                if (writePatched(mapFiles.get(i), contents.get(i))) {
-                    n++;
-                }
-            }
-            log.log("[+] Map randomization: reordered " + n + " level layout headers.");
-            return n;
-        } catch (Exception e) {
-            log.log("[!] Map randomization failed: " + e.getMessage());
-            return 0;
-        }
+        log.log("[+] Maps: skipped (tile shuffle disabled).");
+        return 0;
     }
 
     public int randomizeQuests(Random rnd) {
-        try {
-            List<Path> questFiles = findMatching(p -> TableScanner.isQuest(Files.readAllBytes(p)));
-            if (questFiles.size() < 2) {
-                log.log("[+] Quest randomization: not enough targets (" + questFiles.size() + ").");
-                return 0;
-            }
-            List<byte[]> contents = new ArrayList<>();
-            for (Path p : questFiles) {
-                contents.add(Files.readAllBytes(p));
-            }
-            Collections.shuffle(contents, rnd);
-            int n = 0;
-            for (int i = 0; i < questFiles.size(); i++) {
-                if (writePatched(questFiles.get(i), contents.get(i))) {
-                    n++;
-                }
-            }
-            log.log("[+] Quest item randomization: swapped " + n + " quest blobs.");
-            return n;
-        } catch (Exception e) {
-            log.log("[!] Quest randomization failed: " + e.getMessage());
-            return 0;
-        }
+        log.log("[+] Quests: skipped (use loot only).");
+        return 0;
     }
 
-    /**
-     * QoL: on the extracted CD folder, rename common intro/movie streams so the game
-     * cannot open them. User still rebuilds the ISO with CDImg afterward.
-     */
-    public int disableVideos(Path cdRoot) {
-        if (cdRoot == null || !Files.isDirectory(cdRoot)) {
-            log.log("[!] disableVideos: CD folder not set.");
-            return 0;
-        }
-        try {
-            List<Path> hits = new ArrayList<>();
-            try (Stream<Path> walk = Files.walk(cdRoot, 6)) {
-                walk.filter(Files::isRegularFile).forEach(p -> {
-                    String n = p.getFileName().toString().toUpperCase(Locale.ROOT);
-                    if (n.endsWith(".STR") || n.endsWith(".XA")
-                            || n.contains("MOVIE") || n.contains("INTRO")
-                            || n.contains("FMV") || n.contains("CINE")) {
-                        hits.add(p);
-                    }
-                });
-            }
-            int n = 0;
-            for (Path p : hits) {
-                Path bak = p.resolveSibling(p.getFileName().toString() + ".vidbak");
-                if (!Files.exists(bak)) {
-                    Files.move(p, bak);
-                    n++;
-                    log.log("    disabled video: " + cdRoot.relativize(p));
-                }
-            }
-            log.log("[+] Disable videos: " + n + " file(s) renamed to *.vidbak on CD folder.");
-            if (n == 0) {
-                log.log("    (No .STR/.XA/MOVIE/INTRO files found — intros may be audio tracks only.)");
-            }
-            return n;
-        } catch (Exception e) {
-            log.log("[!] disableVideos failed: " + e.getMessage());
-            return 0;
-        }
-    }
-
-
-    /**
-     * Weapon damage-like pairs: consecutive u16 (min,max) with 1 <= min <= max <= 80
-     * inside item string tables. Rewritten into weaponMin–weaponMax (min <= max).
-     */
     public int randomizeWeaponStats(Random rnd, RandomizerOptions options) {
         try {
             List<Path> files = findMatching(p -> {
@@ -871,87 +739,185 @@ public final class RandomizerEngine {
      *   <li>Only known interior template sizes are shuffled (avoids unique critical blobs)</li>
      * </ul>
      */
-    public int randomizeDungeons(Random rnd, RandomizerOptions options) {
+
+    /**
+     * Shuffle MO_* encounter name slots across LAND / LEVEL blobs.
+     * Same-capacity string slots only — changes which enemy types appear where.
+     */
+    public int randomizeEnemyTypes(Random rnd) {
         try {
-            List<Path> allFolders = findLandFolders();
-            if (allFolders.isEmpty()) {
-                allFolders = findFoldersWithFeMaps(8);
+            List<Path> files = findMatching(p -> {
+                byte[] b = Files.readAllBytes(p);
+                if (b.length < 32 || b.length > 200_000) return false;
+                String t = TableScanner.latin1(b);
+                return t.contains("MO_");
+            });
+            class Slot {
+                Path file; int off; String name; int capacity;
+                Slot(Path f, int o, String n, int c) { file=f; off=o; name=n; capacity=c; }
             }
-            if (allFolders.isEmpty()) {
-                log.log("[+] Dungeons: no LAND*/LEVEL* folders found (unpack LANDS + QUEST0/1/2 first).");
+            List<Slot> slots = new ArrayList<>();
+            Map<Path, byte[]> dataMap = new HashMap<>();
+            java.util.regex.Pattern mo = java.util.regex.Pattern.compile("MO_[A-Z0-9_]+");
+            for (Path p : files) {
+                byte[] data = Files.readAllBytes(p);
+                dataMap.put(p, data);
+                String text = new String(data, java.nio.charset.StandardCharsets.US_ASCII);
+                java.util.regex.Matcher m = mo.matcher(text);
+                while (m.find()) {
+                    String name = m.group();
+                    int end = m.end();
+                    // Strict: only the name + its terminating NUL. Never eat padding that
+                    // belongs to the next dictionary key (e.g. MOPTION after MO_WEREWOLF).
+                    if (end >= data.length || data[end] != 0) continue;
+                    int cap = name.length() + 1;
+                    if (cap < 6 || cap > 24) continue;
+                    // skip quest-unique names that gate fights
+                    String u = name.toUpperCase(Locale.ROOT);
+                    if (u.contains("QUEST") || u.contains("BOSS") || u.contains("DRAAK")) continue;
+                    slots.add(new Slot(p, m.start(), name, cap));
+                }
+            }
+            if (slots.size() < 4) {
+                log.log("[+] Enemy types: not enough MO_ slots (" + slots.size() + ").");
                 return 0;
             }
+            // Group by capacity; shuffle names within capacity bands
+            Map<Integer, List<Slot>> byCap = new HashMap<>();
+            for (Slot s : slots) byCap.computeIfAbsent(s.capacity, k -> new ArrayList<>()).add(s);
+            int changed = 0;
+            Set<Path> dirty = new HashSet<>();
+            for (List<Slot> group : byCap.values()) {
+                if (group.size() < 2) continue;
+                List<String> names = new ArrayList<>();
+                for (Slot s : group) names.add(s.name);
+                Collections.shuffle(names, rnd);
+                for (int i = 0; i < group.size(); i++) {
+                    Slot s = group.get(i);
+                    String nn = names.get(i);
+                    if (nn.equals(s.name)) continue;
+                    if (nn.length() + 1 > s.capacity) continue;
+                    byte[] data = dataMap.get(s.file);
+                    byte[] nb = nn.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+                    // Write shorter-or-equal names only; pad with single NUL, leave rest of slot
+                    if (nb.length + 1 > s.capacity) continue;
+                    Arrays.fill(data, s.off, s.off + s.capacity, (byte) 0);
+                    System.arraycopy(nb, 0, data, s.off, nb.length);
+                    data[s.off + nb.length] = 0;
+                    dirty.add(s.file);
+                    changed++;
+                }
+            }
+            int fileCount = 0;
+            for (Path p : dirty) {
+                if (writePatched(p, dataMap.get(p))) fileCount++;
+            }
+            log.log("[+] Enemy types: " + changed + " MO_ slots in " + fileCount + " blobs.");
+            return changed;
+        } catch (Exception e) {
+            log.log("[!] Enemy type shuffle failed: " + e.getMessage());
+            return 0;
+        }
+    }
 
-            List<Path> landFolders = new ArrayList<>();
-            List<Path> levelFolders = new ArrayList<>();
-            for (Path folder : allFolders) {
+    /**
+     * Patch extra combat-ish u16 fields on hero and enemy templates:
+     * bands for AC (0–80-ish), hit (20–120), speed (5–40), plus existing level range.
+     */
+    public int randomizeCombatExtras(Random rnd, RandomizerOptions options) {
+        try {
+            List<Path> files = findMatching(p -> {
+                byte[] b = Files.readAllBytes(p);
+                if (TableScanner.isUiStringTable(b)) return false;
+                return TableScanner.isEnemy(b) || TableScanner.isHero(b) || TableScanner.looksLikeMonster(b);
+            });
+            int patched = 0;
+            int fields = 0;
+            for (Path p : files) {
+                byte[] data = Files.readAllBytes(p);
+                ByteBuffer bb = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+                int local = 0;
+                for (int off = 0; off + 2 <= data.length; off += 2) {
+                    int val = bb.getShort(off) & 0xFFFF;
+                    // skip ASCII neighborhood
+                    int prev = off > 0 ? (data[off - 1] & 0xFF) : 0;
+                    int next = off + 2 < data.length ? (data[off + 2] & 0xFF) : 0;
+                    if ((prev >= 0x20 && prev < 0x7F) || (next >= 0x20 && next < 0x7F)) continue;
+
+                    int neu = -1;
+                    // AC-like: small values often 0–60
+                    if (val >= 1 && val <= 60 && options.acMax > 0) {
+                        // dilute: only ~25% of candidates
+                        if (rnd.nextInt(4) == 0) neu = options.randomAc(rnd);
+                    }
+                    // Hit / accuracy-like mid band
+                    else if (val >= 40 && val <= 150) {
+                        if (rnd.nextInt(5) == 0) neu = options.randomHit(rnd);
+                    }
+                    // Speed-like low-mid
+                    else if (val >= 6 && val <= 35) {
+                        if (rnd.nextInt(5) == 0) neu = options.randomSpeed(rnd);
+                    }
+                    if (neu >= 0 && neu != val) {
+                        bb.putShort(off, (short) neu);
+                        local++;
+                    }
+                }
+                if (local > 0 && writePatched(p, data)) {
+                    patched++;
+                    fields += local;
+                }
+            }
+            log.log("[+] Combat extras: " + fields + " fields in " + patched + " blobs (AC/hit/speed bands).");
+            return fields;
+        } catch (Exception e) {
+            log.log("[!] Combat extras failed: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    public int randomizeDungeons(Random rnd, RandomizerOptions options) {
+        try {
+            int total = 0;
+            List<Path> landFolders = findLandFolders();
+            if (landFolders.isEmpty()) {
+                landFolders = findFoldersWithFeMaps(8);
+            }
+            List<Path> landsOnly = new ArrayList<>();
+            for (Path folder : landFolders) {
                 String n = folder.getFileName().toString().toUpperCase(Locale.ROOT);
                 if (n.startsWith("LAND")) {
-                    landFolders.add(folder);
-                } else if (n.startsWith("LEVEL") || n.startsWith("DRAAK")) {
-                    if (isFinalDungeonFolder(n) && !options.dungeonsFinal) {
-                        continue;
-                    }
-                    if (options.dungeonsInteriors) {
-                        levelFolders.add(folder);
-                    }
+                    landsOnly.add(folder);
                 }
             }
 
-            int total = 0;
-            List<Path> landFe56 = new ArrayList<>();
-            // tier -> FE56 paths for optional cross-interior
-            Map<String, List<Path>> tierFe56 = new HashMap<>();
-
-            // --- Overworld LAND* ---
-            for (Path folder : landFolders) {
-                int n = shuffleFolderMapObjects(folder, rnd, options, true, landFe56, null);
-                if (n > 0) {
-                    log.log("    " + folder.getFileName() + " (land): " + n + " objects");
-                }
-                total += n;
-            }
-
-            // --- Dungeon LEVEL* ---
-            for (Path folder : levelFolders) {
-                String tier = questTierOf(folder);
-                List<Path> sink = options.dungeonsCrossInterior
-                        ? tierFe56.computeIfAbsent(tier, k -> new ArrayList<>())
-                        : null;
-                int n = shuffleFolderMapObjects(folder, rnd, options, false, null, sink);
-                if (n > 0) {
-                    log.log("    " + folder.getFileName() + " (interior/" + tier + "): " + n + " objects");
-                }
-                total += n;
-            }
-
-            // Cross-land: LAND FE56 only
-            if (options.dungeonsCrossLand && landFe56.size() >= 2) {
-                // Re-read after per-pack may have skipped 56s
-                int n = shufflePathContents(landFe56, rnd);
-                log.log("    cross-land: " + n + " x FE56 headers across " + landFolders.size() + " LAND packs");
-                total += n;
-            }
-
-            // Cross-interior: per QUEST tier only
-            if (options.dungeonsCrossInterior) {
-                for (Map.Entry<String, List<Path>> e : tierFe56.entrySet()) {
-                    if (e.getValue().size() < 2) {
-                        continue;
+            // 1) Overworld tiles (FE56) per land pack
+            if (options.dungeons) {
+                List<Path> landFe56 = new ArrayList<>();
+                for (Path folder : landsOnly) {
+                    int n = shuffleFolderMapObjects(folder, rnd, options, true, landFe56, null);
+                    if (n > 0) {
+                        log.log("    " + folder.getFileName() + " (land tiles): " + n);
                     }
-                    int n = shufflePathContents(e.getValue(), rnd);
-                    log.log("    cross-interior [" + e.getKey() + "]: " + n + " x FE56");
                     total += n;
                 }
+                if (options.dungeonsCrossLand && landFe56.size() >= 2) {
+                    total += shufflePathContents(landFe56, rnd);
+                    log.log("    cross-land FE56: " + landFe56.size());
+                }
             }
 
-            log.log("[+] Dungeons: " + total + " map objects"
-                    + " (LAND packs=" + landFolders.size()
-                    + ", LEVEL packs=" + levelFolders.size()
-                    + (options.dungeonsCrossLand ? ", cross-land FE56" : "")
-                    + (options.dungeonsCrossInterior ? ", cross-interior FE56 by tier" : "")
-                    + (options.dungeonsFinal ? ", final dungeon on" : ", final dungeon off")
-                    + ").");
+            // 2) Dungeon doors = structural FE props with fixed counts across LAND packs
+            //    (sizes observed in every LAND: 238,300,360,408,414,496,530,544,...)
+            if (options.dungeonDoors) {
+                int doors = shuffleDungeonDoors(rnd, landsOnly);
+                total += doors;
+                log.log("[+] Dungeon doors: shuffled " + doors + " structural prop blobs across lands.");
+            }
+
+            log.log("[+] Dungeons total objects touched: " + total
+                    + " (tiles=" + options.dungeons + ", doors=" + options.dungeonDoors
+                    + ", cross-land=" + options.dungeonsCrossLand + ").");
             return total;
         } catch (Exception ex) {
             log.log("[!] Dungeon randomization failed: " + ex.getMessage());
@@ -959,116 +925,79 @@ public final class RandomizerEngine {
         }
     }
 
-    private static boolean isFinalDungeonFolder(String upperName) {
-        return upperName.startsWith("LEVEL29") || upperName.startsWith("LEVEL30")
-                || upperName.startsWith("DRAAK");
-    }
-
-    /** QUEST0 / QUEST1 / QUEST2 from parent path, else "OTHER". */
-    private static String questTierOf(Path folder) {
-        Path p = folder;
-        for (int i = 0; i < 6 && p != null; i++) {
-            String n = p.getFileName().toString().toUpperCase(Locale.ROOT);
-            if (n.startsWith("QUEST0")) return "QUEST0";
-            if (n.startsWith("QUEST1")) return "QUEST1";
-            if (n.startsWith("QUEST2")) return "QUEST2";
-            if (n.contains("QUEST0")) return "QUEST0";
-            if (n.contains("QUEST1")) return "QUEST1";
-            if (n.contains("QUEST2")) return "QUEST2";
-            p = p.getParent();
-        }
-        return "OTHER";
-    }
-
     /**
-     * @param landMode true = overworld (collect FE56 into landFe56 when cross-land)
-     * @param landFe56 out sink for land FE56 paths when cross-land enabled
-     * @param tierFe56 out sink for interior FE56 when cross-interior enabled
+     * Cross-land shuffle of same-size structural FE (not the 48x FE56 tile headers).
+     * These fixed-count props are the practical stand-in for overworld dungeon doors.
      */
-    private int shuffleFolderMapObjects(Path folder, Random rnd, RandomizerOptions options,
-                                        boolean landMode, List<Path> landFe56, List<Path> tierFe56)
-            throws IOException {
-        // Known safe interior template sizes (QUEST LEVEL packs)
-        final Set<Integer> interiorSizes = Set.of(56, 304, 664, 948, 1252, 1332, 1562);
-        // Overworld: FE header 56 + a few repeated prop sizes seen in LAND packs
-        final Set<Integer> landSizes = Set.of(56, 112, 168, 224, 280, 336);
+    private int shuffleDungeonDoors(Random rnd, List<Path> landFolders) throws IOException {
+        // Sizes that appear with the same count in every LAND sample we inventoried
+        Set<Integer> doorSizes = Set.of(
+                238, 300, 360, 408, 414, 496, 530, 544, 546, 604, 608, 626, 652, 704
+        );
+        Map<Integer, List<Path>> pool = new HashMap<>();
+        for (Path folder : landFolders) {
+            try (Stream<Path> list = Files.list(folder)) {
+                for (Path p : list.filter(Files::isRegularFile)
+                        .filter(f -> f.getFileName().toString().endsWith(".bin"))
+                        .toList()) {
+                    byte[] b = Files.readAllBytes(p);
+                    if (b.length < 100 || b[0] != (byte) 0xFE) continue;
+                    if (!doorSizes.contains(b.length)) continue;
+                    pool.computeIfAbsent(b.length, k -> new ArrayList<>()).add(p);
+                }
+            }
+        }
+        int n = 0;
+        for (Map.Entry<Integer, List<Path>> e : pool.entrySet()) {
+            if (e.getValue().size() < 2) continue;
+            int c = shufflePathContents(e.getValue(), rnd);
+            if (c > 0) {
+                log.log("    door-size " + e.getKey() + ": " + c + " blobs");
+            }
+            n += c;
+        }
+        return n;
+    }
 
+
+    private int shuffleFolderMapObjects(Path folder, Random rnd, RandomizerOptions options,
+                                        boolean landMode, List<Path> landFe56, List<Path> ignored)
+            throws IOException {
+        final Set<Integer> landSizes = Set.of(56, 112, 168, 224, 280, 336);
         Map<Long, List<Path>> bySize = new HashMap<>();
         try (Stream<Path> list = Files.list(folder)) {
             for (Path p : list.filter(Files::isRegularFile)
                     .filter(f -> f.getFileName().toString().endsWith(".bin"))
                     .toList()) {
                 byte[] b = Files.readAllBytes(p);
-                if (b.length < 56 || b.length > 20_000) {
-                    continue;
-                }
+                if (b.length < 56 || b.length > 20_000) continue;
                 boolean isFe = b[0] == (byte) 0xFE;
-                if (!isFe && !interiorSizes.contains(b.length) && !landSizes.contains(b.length)) {
-                    continue;
-                }
-                if (landMode) {
-                    if (!isFe && !landSizes.contains(b.length)) {
-                        continue;
-                    }
-                    // Non-56 land FE: only if we have repeated sizes (handled by group size)
-                    if (isFe && b.length != 56 && b.length > 512) {
-                        continue; // large unique FE props stay put
-                    }
-                } else {
-                    // Interiors: FE or known template sizes only
-                    if (!isFe && !interiorSizes.contains(b.length)) {
-                        continue;
-                    }
-                    if (isFe && b.length != 56 && !interiorSizes.contains(b.length)) {
-                        continue;
-                    }
-                }
+                if (!isFe) continue;
+                if (b.length != 56 && b.length > 512) continue;
+                if (!landSizes.contains(b.length) && b.length != 56) continue;
                 bySize.computeIfAbsent((long) b.length, k -> new ArrayList<>()).add(p);
-                if (isFe && b.length == 56) {
-                    if (landMode && options.dungeonsCrossLand && landFe56 != null) {
-                        landFe56.add(p);
-                    }
-                    if (!landMode && options.dungeonsCrossInterior && tierFe56 != null) {
-                        tierFe56.add(p);
-                    }
+                if (isFe && b.length == 56 && options.dungeonsCrossLand && landFe56 != null) {
+                    landFe56.add(p);
                 }
             }
         }
-
         int folderCount = 0;
         for (Map.Entry<Long, List<Path>> e : bySize.entrySet()) {
-            List<Path> group = e.getValue();
-            if (group.size() < 2) {
-                continue;
-            }
-            // Defer FE56 to cross pass when requested
-            if (e.getKey() == 56L) {
-                if (landMode && options.dungeonsCrossLand) {
-                    continue;
-                }
-                if (!landMode && options.dungeonsCrossInterior) {
-                    continue;
-                }
-            }
-            folderCount += shufflePathContents(group, rnd);
+            if (e.getValue().size() < 2) continue;
+            if (e.getKey() == 56L && options.dungeonsCrossLand) continue;
+            folderCount += shufflePathContents(e.getValue(), rnd);
         }
         return folderCount;
     }
 
     private int shufflePathContents(List<Path> paths, Random rnd) throws IOException {
-        if (paths.size() < 2) {
-            return 0;
-        }
+        if (paths.size() < 2) return 0;
         List<byte[]> contents = new ArrayList<>(paths.size());
-        for (Path p : paths) {
-            contents.add(Files.readAllBytes(p));
-        }
+        for (Path p : paths) contents.add(Files.readAllBytes(p));
         Collections.shuffle(contents, rnd);
         int n = 0;
         for (int i = 0; i < paths.size(); i++) {
-            if (writePatched(paths.get(i), contents.get(i))) {
-                n++;
-            }
+            if (writePatched(paths.get(i), contents.get(i))) n++;
         }
         return n;
     }

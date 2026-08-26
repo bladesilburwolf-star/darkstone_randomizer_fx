@@ -14,5 +14,13 @@ public interface LogSink {
         log(text);
     }
 
+    default void info(String message) {
+        log(message);
+    }
+
+    default void warning(String message) {
+        log("[!] " + message);
+    }
+
     LogSink NULL = message -> { };
 }

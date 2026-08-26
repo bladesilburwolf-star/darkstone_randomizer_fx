@@ -127,8 +127,23 @@ public final class TableScanner {
     }
 
     /** Hero class tables live in larger DATA1 blobs embedding multiple class names. */
+    /**
+     * UI / language tables embed class names AND STMN_/STR_ keys.
+     * Never treat those as hero stat blobs (patching them shows raw keys in menus).
+     */
+    public static boolean isUiStringTable(byte[] data) {
+        if (data == null || data.length < 100) return false;
+        String txt = latin1(data);
+        return txt.contains("STMN_") || txt.contains("STR_EQUIP") || txt.contains("STR_BAG")
+                || txt.contains("STR_VALID") || txt.contains("STMN_NEWG");
+    }
+
     public static boolean isHero(byte[] data) {
-        if (data.length < 2000 || data.length > 80_000) {
+        // Real class tables are compact; the ~27–32 KB language blobs are NOT heroes.
+        if (data.length < 1500 || data.length > 12_000) {
+            return false;
+        }
+        if (isUiStringTable(data)) {
             return false;
         }
         String txt = latin1(data);

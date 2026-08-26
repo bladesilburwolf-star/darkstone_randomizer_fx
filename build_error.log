@@ -1,0 +1,6 @@
+Compiling Darkstone PSX Randomizer (JavaFX)... 
+Timestamp: Tue 08/25/2026 18:53:53.22 
+ 
+Note: src\com\serifsystemworks\darkstone\ui\MainView.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+[OK] Build complete. Output in .\out 
