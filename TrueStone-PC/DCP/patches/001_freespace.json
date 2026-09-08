@@ -1,0 +1,28 @@
+{
+  "id": "DCP-001",
+  "name": "Free disk space check bypass",
+  "description": "GetDiskFreeSpaceA product overflows on large free space; skip error paths.",
+  "exe": "Darkstone.exe",
+  "size": 1372160,
+  "imageBase": "0x400000",
+  "edits": [
+    {
+      "name": "check1_always_ok",
+      "fileOffset": "0x71474",
+      "from": "81F900C0D4017306",
+      "to": "909090909090EB06"
+    },
+    {
+      "name": "check2_skip_50mb",
+      "fileOffset": "0xA66D3",
+      "from": "3D00400D037328",
+      "to": "9090909090EB28"
+    },
+    {
+      "name": "check2_skip_70mb",
+      "fileOffset": "0xA6702",
+      "from": "3D00C045047321",
+      "to": "9090909090EB21"
+    }
+  ]
+}

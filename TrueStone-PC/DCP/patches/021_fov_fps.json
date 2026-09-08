@@ -1,0 +1,35 @@
+{
+  "id": "DCP-021",
+  "name": "Camera FOV/zoom + timing scale",
+  "description": "Widen camera base distance 20->28, view angle ~60->75 deg, timing scale 1/60->1/120 (experimental).",
+  "exe": "Darkstone.exe",
+  "size": 1372160,
+  "depends": [
+    "DCP-001",
+    "DCP-020"
+  ],
+  "edits": [
+    {
+      "name": "camera_distance_28",
+      "fileOffset": "0x1108C0",
+      "from": "0000A041",
+      "to": "0000E041",
+      "note": "float 20.0 -> 28.0"
+    },
+    {
+      "name": "view_angle_75deg",
+      "fileOffset": "0x1108C8",
+      "from": "920A863F",
+      "to": "368DA73F",
+      "note": "float ~60deg rad -> ~75deg rad"
+    },
+    {
+      "name": "timing_1_120",
+      "fileOffset": "0x1108CC",
+      "from": "8988883C",
+      "to": "8988083C",
+      "note": "float 1/60 -> 1/120"
+    }
+  ],
+  "fps_notes": "No Sleep(16)-style cap found; FPS is likely VSync-bound. Use dgVoodoo2 / GPU VSync Off for true uncap. If the game runs fast, revert timing_1_120."
+}

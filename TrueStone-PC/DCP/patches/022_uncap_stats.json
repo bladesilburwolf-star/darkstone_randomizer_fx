@@ -1,0 +1,15 @@
+{
+  "id": "DCP-022",
+  "name": "Uncap attribute clamp (100 -> none)",
+  "description": "NOP five code sites that clamped a computed attribute value to 100 (cmp eax,100 / jle / mov eax,100). Pair with TrueStone uncapMaxStats (MAX_* rows = 999).",
+  "exe": "Darkstone.exe",
+  "size": 1372160,
+  "depends": ["DCP-001"],
+  "edits": [
+    { "name": "nop_clamp_22ac3", "fileOffset": "0x22AC3", "from": "83F8647E05B864000000", "to": "90909090909090909090" },
+    { "name": "nop_clamp_22b5b", "fileOffset": "0x22B5B", "from": "83F8647E05B864000000", "to": "90909090909090909090" },
+    { "name": "nop_clamp_24ad8", "fileOffset": "0x24AD8", "from": "83F8647E05B864000000", "to": "90909090909090909090" },
+    { "name": "nop_clamp_24b81", "fileOffset": "0x24B81", "from": "83F8647E05B864000000", "to": "90909090909090909090" },
+    { "name": "nop_clamp_b5312", "fileOffset": "0xB5312", "from": "83F8647E05B864000000", "to": "90909090909090909090" }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "DCP-020",
+  "name": "Difficulty clamp + TrueStone window title",
+  "description": "Map difficulty 4/5 selection to 3 (hardest stock). Rename menu tokens 4/5 to MDIFFICULTY0. Default window title DARKSTONE -> TrueStone.",
+  "exe": "Darkstone.exe",
+  "size": 1372160,
+  "depends": ["DCP-001"],
+  "edits": [
+    { "name": "clamp_4_82fea", "fileOffset": "0x82FEA", "from": "C705ECCA530004000000", "to": "C705ECCA530003000000" },
+    { "name": "clamp_5_830f9", "fileOffset": "0x830F9", "from": "C705ECCA530005000000", "to": "C705ECCA530003000000" },
+    { "name": "clamp_4_832c2", "fileOffset": "0x832C2", "from": "C705ECCA530004000000", "to": "C705ECCA530003000000" },
+    { "name": "clamp_5_8330f", "fileOffset": "0x8330F", "from": "C705ECCA530005000000", "to": "C705ECCA530003000000" },
+    { "name": "clamp_4_837de", "fileOffset": "0x837DE", "from": "C705ECCA530004000000", "to": "C705ECCA530003000000" },
+    { "name": "clamp_5_83822", "fileOffset": "0x83822", "from": "C705ECCA530005000000", "to": "C705ECCA530003000000" },
+    { "name": "clamp_4_83aa4", "fileOffset": "0x83AA4", "from": "C705ECCA530004000000", "to": "C705ECCA530003000000" },
+    { "name": "clamp_5_83af1", "fileOffset": "0x83AF1", "from": "C705ECCA530005000000", "to": "C705ECCA530003000000" },
+    { "name": "window_title", "fileOffset": "0x13385C", "from": "4441524B53544F4E4500", "to": "5472756553746F6E6500" },
+    { "name": "ver_tag", "fileOffset": "0x133868", "from": "3F3F3F00", "to": "76313800" },
+    { "name": "menu_id_5", "fileOffset": "0x13C648", "from": "4D444946464943554C54593500", "to": "4D444946464943554C54593000" },
+    { "name": "menu_id_4", "fileOffset": "0x13C658", "from": "4D444946464943554C54593400", "to": "4D444946464943554C54593000" }
+  ]
+}
